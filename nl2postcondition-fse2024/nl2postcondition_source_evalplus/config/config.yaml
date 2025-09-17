@@ -1,5 +1,5 @@
 defaults:
   - experiment: generateLLMSamples
-  - api: azure
+  - api: openai
   - benchmarks: evalplus
 
