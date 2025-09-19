@@ -8,7 +8,7 @@ sampleType: postcondition
 multirun: false
 
 # Path to where the raw llm samples are housed
-samplesFolder: "llm_gen_outputs/sample_GPT4simpleWithRef"
+samplesFolder: "llm_gen_outputs/2025-09-19/10-15-18"
 
 # Indicating if it is an opensource model, as in our evaluation, StarChat required more aggressive preprocessing
 # due to less standardization in model responses
