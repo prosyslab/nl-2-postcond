@@ -1,28 +1,38 @@
-# Project
+# nl2postcondition
 
-This repository contains the artefacts from several works around generating and evaluating formal declarative specifications from informal/natural language intent. 
+Natural language to program postcondition generation
 
-- [Can Large Language Models Transform Natural Language Intent into Formal Method Postconditions? (FSE'24 article)](nl2postcondition-fse2024)
-- [Evaluating LLM-driven User-Intent Formalization for Verification-Aware Languages (FMCAD'24 article)](eval-formal-specs-fmcad2024)
+FSE'24 paper artefacts. 
 
-## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
+This repository contains the replication materials for the paper, 
 
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
+*Can Large Language Models Transform Natural Language Intent into Formal Method Postconditions?*
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+to appear in Foundations of Software Engineering (FSE), 2024
 
-## Trademarks
+Authors:    Madeline Endres (University of Michigan)
+            Sarah Fakhoury (Microsoft Research);
+            Saikat Chakraborty (Microsoft Research);
+            Shuvendu Lahiri (Microsoft Research)
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+A preprint of the paper is available here: [https://arxiv.org/pdf/2310.01831](https://arxiv.org/abs/2310.01831)
+
+This repository contains the following:
+
+All LLM prompts and postconditions analyzed for the FSE paper
+The set of code-mutants produced for the FSE paper
+Qualitative analysis spreadsheet
+Analysis scripts + docker container for running the nl2postcondition with EvalPlus
+
+Subfolders of this repository contains their own READMEs with more detailed instructions if needed. The layout of this repository is:
+
+* [GeneratedPostconditions](GeneratedPostconditions/README.md): All generated postconditions analyzed in the FSE paper, along with their evaluation results and logs. Includes both EvalPlus and Defects4J results.
+* [QualitativeAnalysis](QualitativeAnalysis): A spreadsheet with the results of our manual analysis of a subset of EvalPlus postconditions
+* [PromptTemplates](PromptTemplates): Contains all prompts ablations used for both EvalPlus and Defects4J. 
+* [nl2postcondition_source_evalplus](nl2postcondition_source_evalplus/README.md): All nl2postcondition code for the EvalPlus benchmark. Includes scripts for postcondition generation, postcondition preprocessing, and postcondition evaluation.
+
+Due to integration with other internal projects, the source code for the Defects4J evaluation is not yet public.
+
+
+
