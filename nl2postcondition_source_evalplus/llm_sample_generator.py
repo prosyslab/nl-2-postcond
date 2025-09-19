@@ -7,16 +7,15 @@ import os
 import sys
 
 import hydra
-import openai
-from decouple import config
-from evalplus.data import write_jsonl
-from omegaconf import OmegaConf
-from tenacity import retry, stop_after_attempt, wait_random_exponential
-
 import log
+import openai
 import prompts
 from benchmarks import load_benchmarks
+from decouple import config
+from evalplus.data import write_jsonl
 from log import make_header
+from omegaconf import OmegaConf
+from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 
 def setup_api(api_cfg, print_and_log):
@@ -331,6 +330,7 @@ def main(cfg):
     )
 
     print_and_log(make_header("JSON SAVED, DONE"))
+    print_and_log(log.OUTPUT_FOLDER)
 
 
 if __name__ == "__main__":

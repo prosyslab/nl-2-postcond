@@ -20,4 +20,6 @@ has_reference_code: true
 # should be base or simple
 prompt_v: base
 
+exp_name: base_ref
+
 system_prompt: "You are a programming assistant that generates executable python only. You generate correct code, so you only generate code you are sure of. You have Python comments explaining your intent when possible."
