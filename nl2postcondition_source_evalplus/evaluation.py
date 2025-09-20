@@ -6,6 +6,7 @@ from textwrap import indent
 
 import click
 import jsonlines
+from tqdm.asyncio import tqdm as atqdm
 
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
 
@@ -27,7 +28,7 @@ def get_eval_code(assertion: str, signature: str, io_pairs: str) -> str:
     io_pairs_dict = json.loads(io_pairs)
     signature = signature.split("\n")[0]
     assertion = assertion.replace("return_value", "result").replace("assert", "return")
-    eval_code = f"""
+    eval_code = f"""from typing import *
 {signature}
 {indent(assertion, " " * 4)}
 
@@ -38,13 +39,14 @@ false_cnt = 0
         input_args_str = ", ".join(repr(arg) for arg in i)
         eval_code += f"v = postcondition({input_args_str}, {repr(o)})\n"
         eval_code += "if v:\n    true_cnt += 1\nelse:\n    false_cnt += 1\n"
-    eval_code += "print(true_cnt, false_cnt)"
+    eval_code += "print(f'{true_cnt} {false_cnt}', flush=True)\n"
     return eval_code
 
 
 async def run_code(code: str) -> tuple[int, int]:
     with tempfile.NamedTemporaryFile(mode="w", delete=True, suffix=".py") as tmp:
         tmp.write(code)
+        tmp.flush()
         tmp_path = tmp.name
         proc = await asyncio.subprocess.create_subprocess_exec(
             "python3",
@@ -52,8 +54,28 @@ async def run_code(code: str) -> tuple[int, int]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
-        processed = stdout.decode().strip().split()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            proc.terminate()
+            await proc.wait()
+            return 0, 0
+        if proc.stdout is None:
+            return 0, 0
+        stdout = await proc.stdout.read()
+        stderr = await proc.stderr.read() if proc.stderr else b""
+        if stderr:
+            print(f"Stderr: {stderr}")
+
+        stdout_str = stdout.decode().strip()
+        if not stdout_str:
+            return 0, 0
+
+        processed = stdout_str.split()
+        if len(processed) != 2:
+            print(f"Warning: Unexpected output format: {processed}")
+            return 0, 0
+
         return int(processed[0]), int(processed[1])
 
 
@@ -73,11 +95,15 @@ async def evaluate_one_assertion(data: dict, evalplus_data: list[dict]) -> dict:
     )
     true_cnt_mutated, false_cnt_mutated = await run_code(eval_code)
 
+    total = true_cnt_correct + false_cnt_correct
+    if total == 0:
+        total = 1  # Prevent division by zero
+
     result = {
-        "is_complete": false_cnt_correct == 0,
-        "is_sound": true_cnt_mutated == 0,
-        "complete_ratio": true_cnt_correct / (true_cnt_correct + false_cnt_correct),
-        "sound_ratio": false_cnt_mutated / (true_cnt_mutated + false_cnt_mutated),
+        "is_complete": false_cnt_correct == 0 and true_cnt_correct > 0,
+        "is_sound": true_cnt_mutated == 0 and false_cnt_mutated > 0,
+        "complete_ratio": true_cnt_correct / total,
+        "sound_ratio": false_cnt_mutated / total,
         "true_cnt_correct": true_cnt_correct,
         "false_cnt_correct": false_cnt_correct,
         "true_cnt_mutated": true_cnt_mutated,
@@ -108,7 +134,7 @@ async def evaluate_target_directory(target_directory: str, dataset: str) -> list
     data = read_target_directory(target_directory)
     evalplus_data = load_dataset(dataset)
     tasks = [evaluate_one_assertion(d, evalplus_data) for d in data]
-    return await asyncio.gather(*tasks)
+    return await atqdm.gather(*tasks)
 
 
 @click.command()
