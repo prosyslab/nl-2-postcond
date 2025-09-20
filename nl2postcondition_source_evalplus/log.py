@@ -1,13 +1,15 @@
 import os
-from hydra.types import RunMode
 import time
+
+from hydra.types import RunMode
 
 OUTPUT_FOLDER = ""
 SUB_FOLDER = "human_readable_programs"
 
+
 # Function to write log
 def write_log(log_file_path, message):
-    with open(log_file_path, 'a') as log_file:
+    with open(log_file_path, "a") as log_file:
         log_file.write(str(message) + "\n")
 
 
@@ -16,13 +18,17 @@ def make_print_and_log_function(log_file_path):
     def print_and_log(message):
         print(message)
         write_log(log_file_path, message)
+
     return print_and_log
+
 
 # Function to create a log_only function with a specific log_file_path
 def make_log_only_function(log_file_path):
     def log_only(message):
         write_log(log_file_path, message)
+
     return log_only
+
 
 def setup_output_dir(output_path_dir, pathExtension=None, subfolder=None):
     """
@@ -32,13 +38,13 @@ def setup_output_dir(output_path_dir, pathExtension=None, subfolder=None):
     # Make directories
     global OUTPUT_FOLDER
     global SUB_FOLDER
-    
+
     if subfolder is not None:
         SUB_FOLDER = subfolder
-    
+
     if isinstance(output_path_dir, str):
         OUTPUT_FOLDER = output_path_dir
-    
+
     else:
         # In this case, it is a hydra config, not a simple path
         hydra_cfg = output_path_dir
@@ -54,13 +60,14 @@ def setup_output_dir(output_path_dir, pathExtension=None, subfolder=None):
         else:
             # This is just the standard vanila case
             OUTPUT_FOLDER = hydra_cfg.run.dir
-        
+
     os.makedirs(os.path.join(OUTPUT_FOLDER, SUB_FOLDER), exist_ok=True)
-        
 
     # return print_and_log function
-    return make_print_and_log_function(os.path.join(OUTPUT_FOLDER, 'run_log.txt')), \
-        make_log_only_function(os.path.join(OUTPUT_FOLDER, 'run_log.txt'))
+    return make_print_and_log_function(
+        os.path.join(OUTPUT_FOLDER, "run_log.txt")
+    ), make_log_only_function(os.path.join(OUTPUT_FOLDER, "run_log.txt"))
+
 
 def make_header(text: str) -> str:
     """

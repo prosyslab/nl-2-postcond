@@ -1,23 +1,19 @@
 from string import Template
 
-
 #################################################################
-#Template for ONE GENERATED, NO REFERENCE OR PRE_CONDITIONS GIVEN
-#################################################################
-
-
-systemMessage="You are a programming assistant that generates executable python only. You generate correct code, so you only generate code you are sure of. You have Python comments explaining your intent when possible."
-
-
-#################################################################
-#TEMPLATES FOR PROMPTS WITH NO REFERENCE CODE GIVEN
+# Template for ONE GENERATED, NO REFERENCE OR PRE_CONDITIONS GIVEN
 #################################################################
 
-genOneNoRef={
 
-"base":
+systemMessage = "You are a programming assistant that generates executable python only. You generate correct code, so you only generate code you are sure of. You have Python comments explaining your intent when possible."
 
-Template("""You have the following Python code, including a function stub and docstring for ${entrypoint}:
+
+#################################################################
+# TEMPLATES FOR PROMPTS WITH NO REFERENCE CODE GIVEN
+#################################################################
+
+genOneNoRef = {
+    "base": Template("""You have the following Python code, including a function stub and docstring for ${entrypoint}:
 
 ${codeStubAndDocstring}
 
@@ -30,10 +26,7 @@ Specifically, the format of your response should be:
 CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 ```
 """),
-
-"simple":
-
-Template("""You are provided with the following Python function stub and docstring for ${entrypoint}. You want to ensure that when the function is implemented, it complies with the specification given in the docstring:
+    "simple": Template("""You are provided with the following Python function stub and docstring for ${entrypoint}. You want to ensure that when the function is implemented, it complies with the specification given in the docstring:
 
 ${codeStubAndDocstring}
 
@@ -54,19 +47,17 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 ``` 
 
 The ${toGenerateShort} should hold true whenever the function ${entrypoint} executes successfully as specified in the docstring, regardless of the eventual internal implementation of the function.     
-""")}
+"""),
+}
 
 
 #################################################################
-#Template for POSTCONDITION GENERATION WITH REFERENCE SOLUTION
+# Template for POSTCONDITION GENERATION WITH REFERENCE SOLUTION
 #################################################################
 
- 
+
 genOneWithRef = {
-
-"base": 
-
-Template("""You have the following Python code${promptAdds}, including the function ${entrypoint} that behaves as specified in its docstring:
+    "base": Template("""You have the following Python code${promptAdds}, including the function ${entrypoint} that behaves as specified in its docstring:
 
 ${codeStubAndDocstring}
 
@@ -79,10 +70,7 @@ Specifically, the format of your response should be:
 CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 ```
 """),
-
-"simple": 
-
-Template("""You are provided with the following Python function implementation for ${entrypoint}, and you want to ensure it is implemented correctly according to the specification in the docstring:
+    "simple": Template("""You are provided with the following Python function implementation for ${entrypoint}, and you want to ensure it is implemented correctly according to the specification in the docstring:
 
 ${codeStubAndDocstring}
 
@@ -103,15 +91,15 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 ``` 
 
 The ${toGenerateShort} should hold true whenever the function ${entrypoint} executes successfully as specified in the docstring, regardless of its internal implementation.        
-""")
+"""),
 }
 
 #################################################################
-#Templates for generating code solutions
+# Templates for generating code solutions
 #################################################################
 
 # Template for generating code
-genCode=Template("""Given the code below, please implement the body of the function ${entrypoint} such that it behaves as described in the given docstring. 
+genCode = Template("""Given the code below, please implement the body of the function ${entrypoint} such that it behaves as described in the given docstring. 
 
 ${codeStubAndDocstring}
 
@@ -123,7 +111,7 @@ ${codeStubAndDocstring}
 ```
 """)
 
-genCodeBuggy=Template("""Given the code below, please implement the body of the function ${entrypoint}. It should behave mostly as expected in the docstring, but please insert at least one bug into your implementation of ${entrypoint}. The bug should be minor enough that your implementation will fail some test cases, but not all.
+genCodeBuggy = Template("""Given the code below, please implement the body of the function ${entrypoint}. It should behave mostly as expected in the docstring, but please insert at least one bug into your implementation of ${entrypoint}. The bug should be minor enough that your implementation will fail some test cases, but not all.
 
 ${codeStubAndDocstring}
 
@@ -134,6 +122,3 @@ ${codeStubAndDocstring}
     # Your implementation goes here
 ```
 """)
-
-
-

@@ -6,4 +6,4 @@ run_range: true
 
 # Only one of run_only or run_except can be non-empty
 run_start: "HumanEval/0"
-run_end: "HumanEval/0"
+run_end: ""
