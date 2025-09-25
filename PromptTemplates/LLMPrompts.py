@@ -4,14 +4,14 @@ from string import Template
 # HUMANEVAL TEMPLATES
 #################################################################
 
-systemMessage="You are a programming assistant that generates executable python only. You generate correct code, so you only generate code you are sure of. You have Python comments explaining your intent when possible."
+systemMessage = "You are a programming assistant that generates executable python only. You generate correct code, so you only generate code you are sure of. You have Python comments explaining your intent when possible."
 
 
 #################################################################
-#Template for BASE PROMPT, NO REFERENCE
+# Template for BASE PROMPT, NO REFERENCE
 #################################################################
 
-genOneNoRef=Template("""You have the following Python code, including a function stub and docstring for ${entrypoint}:
+genOneNoRef = Template("""You have the following Python code, including a function stub and docstring for ${entrypoint}:
 
 ${codeStubAndDocstring}
 
@@ -26,10 +26,10 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 """)
 
 #################################################################
-#Template for SIMPLE PROMPT, NO REFERENCE
+# Template for SIMPLE PROMPT, NO REFERENCE
 #################################################################
 
-genOneNoRef_simple=Template("""You are provided with the following Python function stub and docstring for ${entrypoint}. You want to ensure that when the function is implemented, it complies with the specification given in the docstring:
+genOneNoRef_simple = Template("""You are provided with the following Python function stub and docstring for ${entrypoint}. You want to ensure that when the function is implemented, it complies with the specification given in the docstring:
 
 ${codeStubAndDocstring}
 
@@ -53,17 +53,19 @@ The ${toGenerateShort} should hold true whenever the function ${entrypoint} exec
 """)
 
 #################################################################
-#Postcondition specific subprompts
+# Postcondition specific subprompts
 #################################################################
 
-postCondToUse = Template("For variables, only use the function inputs and the return value of the function. You can use python's re (regular expressions) if needed to deal with strings. Do not call ${entrypoint} itself in the postcondition. Instead, assume that the function has already been called and its return value is available in a variable called `return_value` that you can use. In the postcondition, only use functions that are part of the functional subset of python (e.g., all(), len(), map(), filter(), etc.)")
+postCondToUse = Template(
+    "For variables, only use the function inputs and the return value of the function. You can use python's re (regular expressions) if needed to deal with strings. Do not call ${entrypoint} itself in the postcondition. Instead, assume that the function has already been called and its return value is available in a variable called `return_value` that you can use. In the postcondition, only use functions that are part of the functional subset of python (e.g., all(), len(), map(), filter(), etc.)"
+)
 
 #################################################################
-#Template for BASE, With reference solution in prompt
+# Template for BASE, With reference solution in prompt
 #################################################################
 
 
-# Template for generating a post condition given the reference solution 
+# Template for generating a post condition given the reference solution
 genOneWithRef = Template("""You have the following Python code${promptAdds}, including the function ${entrypoint} that behaves as specified in its docstring:
 
 ${codeStubAndDocstring}
@@ -79,10 +81,10 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 """)
 
 #################################################################
-#Template for SIMPLE, With reference solution in prompt
+# Template for SIMPLE, With reference solution in prompt
 #################################################################
 
-genOneWithRef_simple=Template("""You are provided with the following Python function implementation for ${entrypoint}, and you want to ensure it is implemented correctly according to the specification in the docstring:
+genOneWithRef_simple = Template("""You are provided with the following Python function implementation for ${entrypoint}, and you want to ensure it is implemented correctly according to the specification in the docstring:
 
 ${codeStubAndDocstring}
 
@@ -107,11 +109,11 @@ The ${toGenerateShort} should hold true whenever the function ${entrypoint} exec
 
 
 #################################################################
-#Templates for generating code solutions
+# Templates for generating code solutions
 #################################################################
 
 # Template for generating code
-genCode=Template("""Given the code below, please implement the body of the function ${entrypoint} such that it behaves as described in the given docstring. 
+genCode = Template("""Given the code below, please implement the body of the function ${entrypoint} such that it behaves as described in the given docstring. 
 
 ${codeStubAndDocstring}
 
@@ -123,7 +125,7 @@ ${codeStubAndDocstring}
 ```
 """)
 
-genCodeBuggy=Template("""Given the code below, please implement the body of the function ${entrypoint}. It should behave mostly as expected in the docstring, but please insert at least one bug into your implementation of ${entrypoint}. The bug should be minor enough that your implementation will fail some test cases, but not all.
+genCodeBuggy = Template("""Given the code below, please implement the body of the function ${entrypoint}. It should behave mostly as expected in the docstring, but please insert at least one bug into your implementation of ${entrypoint}. The bug should be minor enough that your implementation will fail some test cases, but not all.
 
 ${codeStubAndDocstring}
 
@@ -140,16 +142,16 @@ ${codeStubAndDocstring}
 #################################################################
 
 
-systemMessage="You are a programming assistant that generates executable java only. You generate correct code, so you only generate code you are sure of. You have java comments explaining your intent when possible."
+systemMessage = "You are a programming assistant that generates executable java only. You generate correct code, so you only generate code you are sure of. You have java comments explaining your intent when possible."
 
 
 #################################################################
-#Template for ONE GENERATED, NO REFERENCE GIVEN
+# Template for ONE GENERATED, NO REFERENCE GIVEN
 #################################################################
 
 # Template for generating postcondition without the reference code
-genOneNoRef=[
-Template("""You have some java code which includes the method stub for the unimplemented method `${entrypointLong}`. This code may contain a natural language comment or Javadoc before ${entrypoint} specifying the correct behavior of the method. You want to ensure that when the method is implemented, it behaves as specified in the Javadoc:
+genOneNoRef = [
+    Template("""You have some java code which includes the method stub for the unimplemented method `${entrypointLong}`. This code may contain a natural language comment or Javadoc before ${entrypoint} specifying the correct behavior of the method. You want to ensure that when the method is implemented, it behaves as specified in the Javadoc:
 
 ${codeStubAndDocstring}
 
@@ -168,14 +170,15 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 ``` 
 
 The ${toGenerateShort} should hold true whenever the method ${entrypoint} executes successfully as specified in the Javadoc, regardless of the eventual internal implementation of the method.
-""")]
+""")
+]
 
 #################################################################
-#Template for ONE GENERATED, REFERENCE GIVEN
+# Template for ONE GENERATED, REFERENCE GIVEN
 #################################################################
 
-genOneWithRef=[
-Template("""You have some java code which includes the method `${entrypointLong}`. This code may contain a natural language comment or Javadoc before ${entrypoint} specifying its correct behavior. You want to ensure that when the method is implemented, it behaves as specified in the Javadoc:
+genOneWithRef = [
+    Template("""You have some java code which includes the method `${entrypointLong}`. This code may contain a natural language comment or Javadoc before ${entrypoint} specifying its correct behavior. You want to ensure that when the method is implemented, it behaves as specified in the Javadoc:
 
 ${codeStubAndDocstring}
 
@@ -194,11 +197,12 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 ``` 
 
 Should they conflict, the ${toGenerateShort} should hold true whenever the method ${entrypoint} executes successfully as specified in the Javadoc, regardless of the actual implementation of the method.
-""")]
+""")
+]
 
 
 #################################################################
-#Postcondition specific subprompts
+# Postcondition specific subprompts
 #################################################################
 postCondExtra1 = """ and a hypothetical return value of the method, which we'll assume is stored in a variable `returnValue`"""
 

@@ -112,5 +112,18 @@ def load_benchmarks(benchmarks_cfg):
         return load_evalplus_subset(benchmarks_cfg)
     elif benchmarks_cfg.name == "Defects4J" or benchmarks_cfg.name == "defects4j":
         return load_defects4j(benchmarks_cfg)
+    elif "apps" in benchmarks_cfg.name:
+        return load_apps(benchmarks_cfg)
     else:
         raise ValueError("Invalid benchmark name: {}".format(benchmarks_cfg.name))
+
+
+def load_apps(apps_cfg):
+    """
+    Loads the apps benchmark
+    """
+    benchmark_path = apps_cfg.location
+    with open(benchmark_path, "r") as f:
+        apps_list = json.load(f)
+
+    return {str(d["problem_id"]): d for d in apps_list}

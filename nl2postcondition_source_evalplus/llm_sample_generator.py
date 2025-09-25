@@ -4,7 +4,7 @@ This file is used to generate sample completions using the LLM model for a given
 
 import json
 import os
-import sys
+from textwrap import indent
 
 import hydra
 import log
@@ -73,8 +73,14 @@ def prepare_prompt(exper_cfg, problem) -> str:
     toUse = ""
     toGenerateShortCaps = ""
     promptAdds = ""
-    entrypoint = problem["entry_point"]
-    code = problem["prompt"]
+    (problem.keys())
+    entrypoint = problem.get("entry_point", "")
+    code = problem.get("prompt", problem.get("question", ""))
+
+    if "signature" in problem:
+        code = problem["signature"].split("\n")[0] + indent(
+            '"""\n' + code + '\n"""', " " * 4
+        )
 
     # If we are doing the code generation task (used to generate buggy code mutants)
     if exper_cfg.to_generate == "code":
@@ -88,7 +94,17 @@ def prepare_prompt(exper_cfg, problem) -> str:
             )
 
     if exper_cfg.has_reference_code:
-        code += problem["canonical_solution"]
+        solution = problem.get("canonical_solution", None)
+        if solution is None:
+            solutions = problem.get("solutions", None)
+            if solutions is not None:
+                try:
+                    first_solution = solutions[0]
+                    code += first_solution
+                except json.JSONDecodeError:
+                    pass
+        else:
+            code += solution
         promptTemplate = prompts.genOneWithRef[exper_cfg.prompt_v]
     else:
         promptTemplate = prompts.genOneNoRef[exper_cfg.prompt_v]
@@ -285,8 +301,6 @@ def main(cfg):
         doRun = False
 
     for task_id in problems:
-        print(cfg.benchmarks.run_start, task_id)
-
         if cfg.benchmarks.run_range and task_id == cfg.benchmarks.run_start:
             doRun = True
 
@@ -334,10 +348,4 @@ def main(cfg):
 
 
 if __name__ == "__main__":
-    if "hydra.mode=MULTIRUN" in sys.argv:
-        sys.argv.append(
-            "hydra.sweep.dir=multirun_llm_gen/${now:%Y-%m-%d}/${now:%H-%M-%S}"
-        )
-    else:
-        sys.argv.append("hydra.run.dir=llm_gen_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}")
     main()
