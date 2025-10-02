@@ -18,7 +18,7 @@ def log_cmd(args: list[str]):
     print(f"Executing {joined}")
 
 
-async def run_exp(target_config: str, idx: int, benchmark: str):
+async def run_exp(save_dir: str, target_config: str, idx: int, benchmark: str):
     await asyncio.sleep(idx * 5)
     exp_name = target_config.replace("generateLLMSamples", "").replace(".yaml", "")
     args = [
@@ -26,7 +26,7 @@ async def run_exp(target_config: str, idx: int, benchmark: str):
         "llm_sample_generator.py",
         f"experiment={target_config}",
         f"benchmarks={benchmark}",
-        f"hydra.run.dir=llm_gen_outputs/{exp_name}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}",
+        f"hydra.run.dir={save_dir}/llm_gen_outputs/{exp_name}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}",
     ]
     log_cmd(args)
     result = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE)
@@ -45,7 +45,7 @@ async def run_exp(target_config: str, idx: int, benchmark: str):
         f"experiment.samplesFolder={saved_path}",
         f"benchmarks={benchmark}",
         f"experiment.exp_name={exp_name}",
-        f"hydra.run.dir=response_preprocess_outputs/{exp_name}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}",
+        f"hydra.run.dir={save_dir}/response_preprocess_outputs/{exp_name}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}",
     ]
     log_cmd(args)
     result = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE)
@@ -64,7 +64,7 @@ async def run_exp(target_config: str, idx: int, benchmark: str):
         f"experiment.preprocessedFolder={saved_path}",
         f"experiment.exp_name={exp_name}",
         f"benchmarks={benchmark}",
-        f"hydra.run.dir=evaluation_outputs/{exp_name}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}",
+        f"hydra.run.dir={save_dir}/evaluation_outputs/{exp_name}/${{now:%Y-%m-%d}}/${{now:%H-%M-%S}}",
     ]
     log_cmd(args)
     proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE)
@@ -78,17 +78,18 @@ async def run_exp(target_config: str, idx: int, benchmark: str):
         print(stdout.decode())
 
 
-async def run_all(benchmark):
+async def run_all(save_dir, benchmark):
     tasks = []
     for idx, config in enumerate(EXP_CONFIGS):
-        tasks.append(run_exp(config, idx, benchmark))
+        tasks.append(run_exp(save_dir, config, idx, benchmark))
     return await asyncio.gather(*tasks)
 
 
 @click.command()
+@click.option("--save_dir", type=str, required=True)
 @click.option("--benchmark", type=str, required=True)
-def main(benchmark):
-    asyncio.run(run_all(benchmark))
+def main(save_dir, benchmark):
+    asyncio.run(run_all(save_dir, benchmark))
 
 
 if __name__ == "__main__":

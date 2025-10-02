@@ -3,83 +3,20 @@ import json
 import os
 import tempfile
 from textwrap import indent
+from typing import Optional
 
+import hydra
 import log
-
-# Optional dependency: tqdm.asyncio. Provide a minimal fallback if missing.
-try:
-    from tqdm.asyncio import tqdm as atqdm  # type: ignore
-
-    _HAS_TQDM = True
-except Exception:  # pragma: no cover
-    _HAS_TQDM = False
-
-    class _ATQDM:  # minimal async gather shim when tqdm is unavailable
-        @staticmethod
-        async def gather(*tasks):  # type: ignore[no-untyped-def]
-            return await asyncio.gather(*tasks)
-
-    atqdm = _ATQDM()  # type: ignore[assignment]
-
-# Optional dependency: hydra/omegaconf. Allow import-time success for linters and
-# provide graceful runtime errors if actually used without being installed.
-try:
-    import hydra  # type: ignore
-    from hydra.core.config_store import ConfigStore  # type: ignore
-    from hydra.utils import to_absolute_path  # type: ignore
-    from omegaconf import DictConfig  # type: ignore
-except Exception:  # pragma: no cover
-    from types import SimpleNamespace
-
-    def _noop_decorator(*args, **kwargs):  # type: ignore[no-untyped-def]
-        def _wrap(fn):  # type: ignore[no-untyped-def]
-            return fn
-
-        return _wrap
-
-    hydra = SimpleNamespace(main=_noop_decorator)  # type: ignore[assignment]
-
-    class DictConfig:  # type: ignore[misc]
-        pass
-
-    class ConfigStore:  # type: ignore[misc]
-        @staticmethod
-        def instance():  # type: ignore[no-untyped-def]
-            raise RuntimeError("Hydra is required to run this script.")
-
-    def to_absolute_path(path: str) -> str:  # type: ignore[misc]
-        return path
-
+from hydra.utils import to_absolute_path
+from tqdm.asyncio import tqdm as atqdm
 
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
 
 
 def load_dataset(dataset: str) -> dict:
-    if "apps" in dataset:
-        with open(dataset, "r") as f:
-            d = json.load(f)
-        for el in d:
-            el["input_output"] = parse_arg(el["parser"], el["input_output"])
-            el["mutated_input_output"] = parse_arg(
-                el["parser"], el["mutated_input_output"]
-            )
-    else:
-        with open(dataset, "r") as f:
-            d = json.load(f)
+    with open(dataset, "r") as f:
+        d = json.load(f)
     return {str(d["problem_id"]): d for d in d}
-
-
-def parse_arg(parser: str, io_pairs: str) -> list:
-    env = {}
-    exec(parser, env)
-    io_pairs_dict = json.loads(io_pairs)
-    args = []
-    for i, o in zip(io_pairs_dict["inputs"], io_pairs_dict["outputs"]):
-        try:
-            args.append(eval(f"parser({repr(i)}, {repr(o)})", env))
-        except Exception:
-            continue
-    return args
 
 
 def read_target_directory(target_directory: str) -> list[dict]:
@@ -93,23 +30,27 @@ def read_target_directory(target_directory: str) -> list[dict]:
         return list(reader)
 
 
-def get_eval_code_with_args(assertion: str, signature: str, args: list) -> str:
+def get_eval_code_with_parser(assertion: str, signature: str, args, parser: str) -> str:
     signature = signature.split("\n")[0]
     assertion = assertion.replace("assert", "return")
     eval_code = f"""from typing import *
 import math
 import re
+{parser}
 {signature}
 {indent(assertion, " " * 4)}
 
 true_cnt = 0
 false_cnt = 0
+error_cnt = 0
 """
-    for arg in args:
-        arg_str = ", ".join(repr(e) for e in arg)
-        eval_code += f"v = postcondition({arg_str})\n"
-        eval_code += "if v:\n    true_cnt += 1\nelse:\n    false_cnt += 1\n"
-    eval_code += "print(f'{true_cnt} {false_cnt}', flush=True)\n"
+    io_pairs = json.loads(args)
+    for i, o in zip(io_pairs["inputs"], io_pairs["outputs"]):
+        eval_code += "try:\n"
+        eval_code += f"    v = postcondition(*parser({repr(i)}, {repr(o)}))\n"
+        eval_code += "    if v == True:\n        true_cnt += 1\n    else:\n        false_cnt += 1\n"
+        eval_code += "except Exception as e:\n    error_cnt += 1\n"
+    eval_code += "print(f'{true_cnt} {false_cnt} {error_cnt}', flush=True)\n"
     return eval_code
 
 
@@ -129,19 +70,19 @@ false_cnt = 0
     for i, o in zip(io_pairs_dict["inputs"], io_pairs_dict["outputs"]):
         input_args_str = ", ".join(repr(arg) for arg in i)
         eval_code += f"v = postcondition({input_args_str}, {repr(o)})\n"
-        eval_code += "if v:\n    true_cnt += 1\nelse:\n    false_cnt += 1\n"
+        eval_code += "if v == True:\n    true_cnt += 1\nelse:\n    false_cnt += 1\n"
     eval_code += "print(f'{true_cnt} {false_cnt}', flush=True)\n"
     return eval_code
 
 
-def get_eval_code(assertion: str, signature: str, args) -> str:
-    if isinstance(args, list):
-        return get_eval_code_with_args(assertion, signature, args)
+def get_eval_code(assertion: str, signature: str, args, parser: Optional[str]) -> str:
+    if parser is not None:
+        return get_eval_code_with_parser(assertion, signature, args, parser)
     else:
         return get_eval_code_with_io_pairs(assertion, signature, args)
 
 
-async def run_code(code: str) -> tuple[int, int]:
+async def run_code(code: str) -> tuple[int, int, int]:
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as tmp:
         tmp.write(code)
         tmp.flush()
@@ -160,25 +101,21 @@ async def run_code(code: str) -> tuple[int, int]:
                 await proc.wait()
             except ProcessLookupError:
                 pass
-            return 0, 0
+            return 0, 0, 0
         if proc.stdout is None:
-            return 0, 0
+            return 0, 0, 0
         stdout = await proc.stdout.read()
         stderr = await proc.stderr.read() if proc.stderr else b""
         if stderr:
-            print(f"Stderr: {stderr}")
-            return 0, 0
+            return 0, 0, 0
 
         stdout_str = stdout.decode().strip()
         if not stdout_str:
-            return 0, 0
+            return 0, 0, 0
 
         processed = stdout_str.split()
-        if len(processed) != 2:
-            print(f"Warning: Unexpected output format: {processed}")
-            return 0, 0
 
-        return int(processed[0]), int(processed[1])
+        return int(processed[0]), int(processed[1]), int(processed[2])
 
 
 def get_total(io_pairs) -> int:
@@ -194,31 +131,41 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict, logger) -> dic
     problem = evalplus_data[problem_idx]
 
     # Check completeness
-    eval_code = get_eval_code(assertion, problem["signature"], problem["input_output"])
+    eval_code = get_eval_code(
+        assertion, problem["signature"], problem["input_output"], problem["parser"]
+    )
     complete_total = get_total(problem["input_output"])
     if complete_total == 0:
         complete_total = 1
-    true_cnt_correct, false_cnt_correct = await run_code(eval_code)
+    true_cnt_correct, false_cnt_correct, error_cnt_correct = await run_code(eval_code)
 
     # Check soundness
     eval_code = get_eval_code(
-        assertion, problem["signature"], problem["mutated_input_output"]
+        assertion,
+        problem["signature"],
+        problem["mutated_input_output"],
+        problem["parser"],
     )
     sound_total = get_total(problem["mutated_input_output"])
     if sound_total == 0:
         sound_total = 1
-    true_cnt_mutated, false_cnt_mutated = await run_code(eval_code)
+    true_cnt_mutated, false_cnt_mutated, error_cnt_mutated = await run_code(eval_code)
 
     result = {
+        "task_id": data["task_id"],
         "assertion": assertion,
-        "is_complete": false_cnt_correct == 0 and true_cnt_correct > 0,
+        "is_complete": false_cnt_correct == 0
+        and true_cnt_correct > 0
+        and error_cnt_correct == 0,
         "is_sound": false_cnt_mutated > true_cnt_mutated,
         "complete_ratio": true_cnt_correct / complete_total,
         "sound_ratio": false_cnt_mutated / sound_total,
         "true_cnt_correct": true_cnt_correct,
         "false_cnt_correct": false_cnt_correct,
+        "error_cnt_correct": error_cnt_correct,
         "true_cnt_mutated": true_cnt_mutated,
         "false_cnt_mutated": false_cnt_mutated,
+        "error_cnt_mutated": error_cnt_mutated,
     }
     return result
 

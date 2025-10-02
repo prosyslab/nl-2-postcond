@@ -2,6 +2,7 @@
 This file is used to generate sample completions using the LLM model for a given prompt.
 """
 
+import ast
 import json
 import os
 from textwrap import indent
@@ -78,8 +79,15 @@ def prepare_prompt(exper_cfg, problem) -> str:
     code = problem.get("prompt", problem.get("question", ""))
 
     if "signature" in problem:
-        code = problem["signature"].split("\n")[0] + indent(
-            '"""\n' + code + '\n"""', " " * 4
+        parsed_signature = ast.parse(problem["signature"])
+        fdef: ast.FunctionDef = parsed_signature.body[0]
+        docstr = ast.get_docstring(fdef)
+        docstr = "" if docstr is None else docstr
+        docstr += "\n" + code
+        code = (
+            problem["signature"].split("\n")[0]
+            + "\n"
+            + indent('"""\n' + docstr + '\n"""', " " * 4)
         )
 
     # If we are doing the code generation task (used to generate buggy code mutants)
