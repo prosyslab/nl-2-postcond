@@ -241,6 +241,36 @@ def paren_check(code):
     return code
 
 
+def extract_assertions(code: str) -> str:
+    """
+    Extracts only assertion statements from code using AST parsing.
+    Returns 'assert True' if parsing fails or no assertions found.
+    """
+    try:
+        tree = ast.parse(code)
+
+        # Find all assertion statements
+        assertions = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assert):
+                assertions.append(node)
+
+        # If no assertions found, return default
+        if not assertions:
+            return "assert True"
+
+        # Create a new module with only assertions
+        new_module = ast.Module(body=assertions, type_ignores=[])
+        ast.fix_missing_locations(new_module)
+
+        # Unparse back to code
+        return ast.unparse(new_module)
+
+    except Exception:
+        # If any error occurs, return default assertion
+        return "assert True"
+
+
 def code_sanitize(code: str, numRetries=2) -> str:
     """
     This function will sanitize the code to make it more readable, and try to fix basic syntax errors
@@ -443,6 +473,8 @@ def processOneLLMGenFolder(cfg, hydra_cfg, extensionDir=None):
 
             # This removes ```python and ``` wrappings if they exist
             rawGenCode = extract_code(rawGen, cfg.experiment.opensourceModel)
+            # Extract only assertion statements from the generated code
+            rawGenCode = extract_assertions(rawGenCode)
             # This wraps postcondions with the canonical solution
             wrapped = wrap_code_solution(
                 cfg.experiment,
