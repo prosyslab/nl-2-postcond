@@ -66,12 +66,15 @@ import re
 
 true_cnt = 0
 false_cnt = 0
+error_cnt = 0
 """
     for i, o in zip(io_pairs_dict["inputs"], io_pairs_dict["outputs"]):
         input_args_str = ", ".join(repr(arg) for arg in i)
-        eval_code += f"v = postcondition({input_args_str}, {repr(o)})\n"
-        eval_code += "if v == True:\n    true_cnt += 1\nelse:\n    false_cnt += 1\n"
-    eval_code += "print(f'{true_cnt} {false_cnt}', flush=True)\n"
+        eval_code += "try:\n"
+        eval_code += f"    v = postcondition({input_args_str}, {repr(o)})\n"
+        eval_code += "    if v == True:\n        true_cnt += 1\n    else:\n        false_cnt += 1\n"
+        eval_code += "except Exception as e:\n    raise e\n"
+    eval_code += "print(f'{true_cnt} {false_cnt} {error_cnt}', flush=True)\n"
     return eval_code
 
 
@@ -82,7 +85,7 @@ def get_eval_code(assertion: str, signature: str, args, parser: Optional[str]) -
         return get_eval_code_with_io_pairs(assertion, signature, args)
 
 
-async def run_code(code: str) -> tuple[int, int, int]:
+async def run_code(code: str, num_of_tc: int) -> tuple[int, int, int, str]:
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as tmp:
         tmp.write(code)
         tmp.flush()
@@ -101,21 +104,24 @@ async def run_code(code: str) -> tuple[int, int, int]:
                 await proc.wait()
             except ProcessLookupError:
                 pass
-            return 0, 0, 0
+            return 0, 0, num_of_tc, "Timeout"
         if proc.stdout is None:
-            return 0, 0, 0
+            return 0, 0, num_of_tc, "No stdout"
         stdout = await proc.stdout.read()
         stderr = await proc.stderr.read() if proc.stderr else b""
         if stderr:
-            return 0, 0, 0
+            return 0, 0, num_of_tc, stderr.decode(errors="replace").strip()
 
         stdout_str = stdout.decode().strip()
         if not stdout_str:
-            return 0, 0, 0
+            return 0, 0, num_of_tc, "No stdout"
 
         processed = stdout_str.split()
 
-        return int(processed[0]), int(processed[1]), int(processed[2])
+        if len(processed) != 3:
+            return 0, 0, num_of_tc, f"Invalid stdout format: {stdout_str}"
+
+        return int(processed[0]), int(processed[1]), int(processed[2]), "Success"
 
 
 def get_total(io_pairs) -> int:
@@ -137,7 +143,12 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict, logger) -> dic
     complete_total = get_total(problem["input_output"])
     if complete_total == 0:
         complete_total = 1
-    true_cnt_correct, false_cnt_correct, error_cnt_correct = await run_code(eval_code)
+    (
+        true_cnt_correct,
+        false_cnt_correct,
+        error_cnt_correct,
+        msg_completeness,
+    ) = await run_code(eval_code, complete_total)
 
     # Check soundness
     eval_code = get_eval_code(
@@ -149,7 +160,15 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict, logger) -> dic
     sound_total = get_total(problem["mutated_input_output"])
     if sound_total == 0:
         sound_total = 1
-    true_cnt_mutated, false_cnt_mutated, error_cnt_mutated = await run_code(eval_code)
+    (
+        true_cnt_mutated,
+        false_cnt_mutated,
+        error_cnt_mutated,
+        msg_soundness,
+    ) = await run_code(
+        eval_code,
+        sound_total,
+    )
 
     result = {
         "task_id": data["task_id"],
@@ -166,6 +185,8 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict, logger) -> dic
         "true_cnt_mutated": true_cnt_mutated,
         "false_cnt_mutated": false_cnt_mutated,
         "error_cnt_mutated": error_cnt_mutated,
+        "msg_completeness": msg_completeness,
+        "msg_soundness": msg_soundness,
     }
     return result
 
