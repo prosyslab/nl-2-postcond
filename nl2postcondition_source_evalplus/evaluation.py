@@ -3,11 +3,15 @@ import json
 import os
 import tempfile
 from textwrap import indent
-from typing import Optional
+from typing import List, Optional
 
 import hydra
 import log
 from hydra.utils import to_absolute_path
+from models import (
+    AggregatedResult,
+    EvaluationResult,
+)
 from tqdm.asyncio import tqdm as atqdm
 
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
@@ -131,7 +135,9 @@ def get_total(io_pairs) -> int:
         return len(json.loads(io_pairs)["inputs"])
 
 
-async def evaluate_one_assertion(data: dict, evalplus_data: dict, logger) -> dict:
+async def evaluate_one_assertion(
+    data: dict, evalplus_data: dict, logger
+) -> EvaluationResult:
     assertion = data["postcondition_alone"]
     problem_idx = data["task_id"].split("/")[-1]
     problem = evalplus_data[problem_idx]
@@ -170,58 +176,57 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict, logger) -> dic
         sound_total,
     )
 
-    result = {
-        "task_id": data["task_id"],
-        "assertion": assertion,
-        "is_complete": false_cnt_correct == 0
-        and true_cnt_correct > 0
-        and error_cnt_correct == 0,
-        "is_sound": false_cnt_mutated > true_cnt_mutated,
-        "complete_ratio": true_cnt_correct / complete_total,
-        "sound_ratio": false_cnt_mutated / sound_total,
-        "true_cnt_correct": true_cnt_correct,
-        "false_cnt_correct": false_cnt_correct,
-        "error_cnt_correct": error_cnt_correct,
-        "true_cnt_mutated": true_cnt_mutated,
-        "false_cnt_mutated": false_cnt_mutated,
-        "error_cnt_mutated": error_cnt_mutated,
-        "msg_completeness": msg_completeness,
-        "msg_soundness": msg_soundness,
-    }
-    return result
+    return EvaluationResult(
+        task_id=data["task_id"],
+        assertion=assertion,
+        is_complete=(
+            false_cnt_correct == 0 and true_cnt_correct > 0 and error_cnt_correct == 0
+        ),
+        is_sound=false_cnt_mutated > true_cnt_mutated,
+        complete_ratio=true_cnt_correct / complete_total,
+        sound_ratio=false_cnt_mutated / sound_total,
+        true_cnt_correct=true_cnt_correct,
+        false_cnt_correct=false_cnt_correct,
+        error_cnt_correct=error_cnt_correct,
+        true_cnt_mutated=true_cnt_mutated,
+        false_cnt_mutated=false_cnt_mutated,
+        error_cnt_mutated=error_cnt_mutated,
+        msg_completeness=msg_completeness,
+        msg_soundness=msg_soundness,
+    )
 
 
-def aggregate_results(results: list[dict], exp_name: str) -> dict:
-    completeness_ratio = sum(result["is_complete"] for result in results) / len(results)
-    soundness_ratio = sum(result["is_sound"] for result in results) / len(results)
-    average_complete_ratio = sum(result["complete_ratio"] for result in results) / len(
+def aggregate_results(
+    results: List[EvaluationResult], exp_name: str
+) -> AggregatedResult:
+    completeness_ratio = sum(result.is_complete for result in results) / len(results)
+    soundness_ratio = sum(result.is_sound for result in results) / len(results)
+    average_complete_ratio = sum(result.complete_ratio for result in results) / len(
         results
     )
-    average_sound_ratio = sum(result["sound_ratio"] for result in results) / len(
-        results
-    )
+    average_sound_ratio = sum(result.sound_ratio for result in results) / len(results)
     sound_and_complete = sum(
-        result["is_complete"] and result["is_sound"] for result in results
+        result.is_complete and result.is_sound for result in results
     )
     complete_only = sum(
-        result["is_complete"] and not result["is_sound"] for result in results
+        result.is_complete and not result.is_sound for result in results
     )
-    failed = sum(not result["is_complete"] for result in results)
-    return {
-        "exp_name": exp_name,
-        "sound_and_complete": sound_and_complete,
-        "complete_only": complete_only,
-        "failed": failed,
-        "completeness_ratio": completeness_ratio,
-        "soundness_ratio": soundness_ratio,
-        "average_complete_ratio": average_complete_ratio,
-        "average_sound_ratio": average_sound_ratio,
-    }
+    failed = sum(not result.is_complete for result in results)
+    return AggregatedResult(
+        exp_name=exp_name,
+        sound_and_complete=sound_and_complete,
+        complete_only=complete_only,
+        failed=failed,
+        completeness_ratio=completeness_ratio,
+        soundness_ratio=soundness_ratio,
+        average_complete_ratio=average_complete_ratio,
+        average_sound_ratio=average_sound_ratio,
+    )
 
 
 async def evaluate_target_directory(
     target_directory: str, dataset: str, logger
-) -> list[dict]:
+) -> List[EvaluationResult]:
     data = read_target_directory(target_directory)
     evalplus_data = load_dataset(dataset)
     tasks = [evaluate_one_assertion(d, evalplus_data, logger) for d in data]
@@ -234,7 +239,7 @@ def main(cfg):
     assert cfg.benchmarks
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
     # Resolve paths relative to original working directory (Hydra changes CWD)
-    print_and_log, log_only = log.setup_output_dir(hydra_cfg)
+    print_and_log, _ = log.setup_output_dir(hydra_cfg)
     target_directory = to_absolute_path(cfg.experiment.preprocessedFolder)
     dataset = to_absolute_path(cfg.benchmarks.location)
 
@@ -245,10 +250,10 @@ def main(cfg):
         evaluate_target_directory(target_directory, dataset, print_and_log)
     )
     with open(os.path.join(hydra_cfg.run.dir, "evaluation_results.json"), "w") as f:
-        json.dump(results, f, indent=4)
+        f.write(json.dumps([result.model_dump() for result in results], indent=4))
     with open(os.path.join(hydra_cfg.run.dir, "aggregated_result.json"), "w") as f:
         agg_result = aggregate_results(results, cfg.experiment.exp_name)
-        json.dump(agg_result, f, indent=4)
+        f.write(agg_result.model_dump_json(indent=4))
     print(agg_result)
 
 
