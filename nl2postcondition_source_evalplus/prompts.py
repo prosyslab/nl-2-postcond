@@ -17,7 +17,7 @@ genOneNoRef = {
 
 ${codeStubAndDocstring}
 
-Please write exactly one ${toGenerateFull} that can be used to increase confidence that ${entrypoint} is implemented correctly according to the specification in its docstring${promptAdds}. Please write the ${toGenerateShort} in Python, and use exactly one python assert statement at the end of the ${toGenerateShort}. Include a Python comment before the ${toGenerateShort} explaining what the ${toGenerateShort} ${toGenerateGoal}. For variables, only use the function inputs and the return value of the function. You can use python's re (regular expressions) if needed to deal with strings. Do not call ${entrypoint} itself in the postcondition. Instead, assume that the function has already been called and its return value is available in a variable called `return_value` that you can use. In the postcondition, only use functions that are part of the functional subset of python (e.g., all(), len(), map(), filter(), etc.). Do not return any other textual description of the code other than the Python comment.
+Please write exactly one ${toGenerateFull} that can be used to increase confidence that ${entrypoint} is implemented correctly according to the specification in its docstring${promptAdds}. Please write the ${toGenerateShort} in Python, and use exactly one python assert statement at the end of the ${toGenerateShort}. Include a Python comment before the ${toGenerateShort} explaining what the ${toGenerateShort} ${toGenerateGoal}. For variables, only use the function inputs and the return value of the function. You can use python's re (regular expressions) if needed to deal with strings. Do not call ${entrypoint} itself in the postcondition. In the postcondition, only use functions that are part of the functional subset of python (e.g., all(), len(), map(), filter(), etc.). Do not return any other textual description of the code other than the Python comment.
 
 Specifically, the format of your response should be:
 
@@ -30,7 +30,7 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 
 ${codeStubAndDocstring}
 
-Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Python and consist of exactly one assert statement. A Python comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the function stub and a hypothetical return value of the function, which we'll assume is stored in a variable `return_value`.
+Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Python and consist of exactly one assert statement. A Python comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the function stub.
 
 For string manipulation, Python's re (regular expressions) library can be used. If other Python standard library functions are necessary, include the corresponding imports. However, refrain from using external libraries or calling the function itself (in this case, ${entrypoint}) within the ${toGenerateShort}.
 
@@ -44,9 +44,9 @@ The format of your response should be:
 ```
 # Comment explaining what aspect of the function the ${toGenerateFull} checks
 CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
-``` 
+```
 
-The ${toGenerateShort} should hold true whenever the function ${entrypoint} executes successfully as specified in the docstring, regardless of the eventual internal implementation of the function.     
+The ${toGenerateShort} should hold true whenever the function ${entrypoint} executes successfully as specified in the docstring, regardless of the eventual internal implementation of the function.
 """),
 }
 
@@ -61,7 +61,7 @@ genOneWithRef = {
 
 ${codeStubAndDocstring}
 
-Please write exactly one ${toGenerateFull} for ${entrypoint}. Please write the ${toGenerateShort} in Python, and use exactly one python assert statement at the end of the ${toGenerateShort}. Include a Python comment before the ${toGenerateShort} explaining what the ${toGenerateShort} ${toGenerateGoal}.  For variables, only use the function inputs and the return value of the function. You can use python's re (regular expressions) if needed to deal with strings. Do not call ${entrypoint} itself in the postcondition. Instead, assume that the function has already been called and its return value is available in a variable called `return_value` that you can use. In the postcondition, only use functions that are part of the functional subset of python (e.g., all(), len(), map(), filter(), etc.). Do not return any other textual description of the code other than the Python comment.
+Please write exactly one ${toGenerateFull} for ${entrypoint}. Please write the ${toGenerateShort} in Python, and use exactly one python assert statement at the end of the ${toGenerateShort}. Include a Python comment before the ${toGenerateShort} explaining what the ${toGenerateShort} ${toGenerateGoal}.  For variables, only use the function inputs and the return value of the function. You can use python's re (regular expressions) if needed to deal with strings. Do not call ${entrypoint} itself in the postcondition. In the postcondition, only use functions that are part of the functional subset of python (e.g., all(), len(), map(), filter(), etc.). Do not return any other textual description of the code other than the Python comment.
 
 Specifically, the format of your response should be:
 
@@ -74,7 +74,7 @@ CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
 
 ${codeStubAndDocstring}
 
-Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Python, and consist of exactly one assert statement. A Python comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the function stub and a hypothetical return value of the function, which we'll assume is stored in a variable `return_value`.
+Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Python, and consist of exactly one assert statement. A Python comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the function stub.
 
 For string manipulation, Python's `re` (regular expressions) library can be used. If other Python standard library functions are required, include the necessary imports. However, refrain from using external libraries or calling the function itself (in this case, ${entrypoint}) within the ${toGenerateShort}.
 
@@ -88,9 +88,9 @@ The format of your response should be:
 ```
 # Comment explaining what aspect of the function the ${toGenerateFull} checks
 CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING ASSERT GOES HERE
-``` 
+```
 
-The ${toGenerateShort} should hold true whenever the function ${entrypoint} executes successfully as specified in the docstring, regardless of its internal implementation.        
+The ${toGenerateShort} should hold true whenever the function ${entrypoint} executes successfully as specified in the docstring, regardless of its internal implementation.
 """),
 }
 
@@ -99,7 +99,7 @@ The ${toGenerateShort} should hold true whenever the function ${entrypoint} exec
 #################################################################
 
 # Template for generating code
-genCode = Template("""Given the code below, please implement the body of the function ${entrypoint} such that it behaves as described in the given docstring. 
+genCode = Template("""Given the code below, please implement the body of the function ${entrypoint} such that it behaves as described in the given docstring.
 
 ${codeStubAndDocstring}
 

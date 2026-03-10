@@ -36,7 +36,7 @@ def read_target_directory(target_directory: str) -> list[dict]:
 
 def get_eval_code_with_parser(assertion: str, signature: str, args, parser: str) -> str:
     signature = signature.split("\n")[0]
-    assertion = assertion.replace("assert", "return")
+    assertion = assertion.replace("return_value", "result").replace("assert", "return")
     eval_code = f"""from typing import *
 import math
 import re
@@ -83,6 +83,7 @@ error_cnt = 0
 
 
 def get_eval_code(assertion: str, signature: str, args, parser: Optional[str]) -> str:
+    assertion = assertion.replace("return_value", "result").replace("assert", "return")
     if parser is not None:
         return get_eval_code_with_parser(assertion, signature, args, parser)
     else:
@@ -211,11 +212,13 @@ def aggregate_results(
     complete_only = sum(
         result.is_complete and not result.is_sound for result in results
     )
-    failed = sum(not result.is_complete for result in results)
+    sound_only = sum(not result.is_complete and result.is_sound for result in results)
+    failed = sum(not result.is_complete and not result.is_sound for result in results)
     return AggregatedResult(
         exp_name=exp_name,
         sound_and_complete=sound_and_complete,
         complete_only=complete_only,
+        sound_only=sound_only,
         failed=failed,
         completeness_ratio=completeness_ratio,
         soundness_ratio=soundness_ratio,

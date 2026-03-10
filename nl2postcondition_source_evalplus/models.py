@@ -22,6 +22,7 @@ class AggregatedResult(BaseModel):
     exp_name: str
     sound_and_complete: int
     complete_only: int
+    sound_only: int
     failed: int
     completeness_ratio: float
     soundness_ratio: float

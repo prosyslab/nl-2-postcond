@@ -4,9 +4,9 @@ import click
 
 EXP_CONFIGS = [
     "generateLLMSamplesSimple.yaml",
-    "generateLLMSamplesBase.yaml",
-    "generateLLMSamplesSimpleRefCode.yaml",
-    "generateLLMSamplesBaseRefCode.yaml",
+    # "generateLLMSamplesBase.yaml",
+    # "generateLLMSamplesSimpleRefCode.yaml",
+    # "generateLLMSamplesBaseRefCode.yaml",
 ]
 
 PPX_CONFIG = "preprocessSamples.yaml"
