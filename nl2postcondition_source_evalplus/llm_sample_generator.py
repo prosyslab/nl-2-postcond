@@ -5,6 +5,7 @@ This file is used to generate sample completions using the LLM model for a given
 import ast
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from textwrap import indent
 
 import hydra
@@ -18,6 +19,11 @@ from omegaconf import OmegaConf
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 CLIENT = None
+
+
+def get_worker_count() -> int:
+    cpu_count = os.cpu_count() or 1
+    return max(1, int(cpu_count * 0.8))
 
 
 def setup_api(api_cfg, print_and_log):
@@ -242,6 +248,28 @@ def generate_one_completion(
     return response
 
 
+def generate_samples_for_problem(
+    exper_cfg, problem, task_id, log_only, postconditions=None
+):
+    samples = []
+    for run_num in range(exper_cfg.n_per_model_call):
+        samples.append(
+            dict(
+                task_id=task_id,
+                run_num=run_num,
+                completion_pre=generate_one_completion(
+                    exper_cfg,
+                    problem,
+                    task_id,
+                    run_num,
+                    log_only,
+                    postconditions,
+                ),
+            )
+        )
+    return samples
+
+
 @hydra.main(version_base=None, config_path="./config", config_name="config")
 def main(cfg):
     # set up the output folder
@@ -270,6 +298,7 @@ def main(cfg):
     print_and_log(make_header("Successfully loaded {} problems".format(len(problems))))
 
     # If we are generating rankings, load the postconditions
+    all_postconditions = None
     if cfg.experiment.to_generate == "rank":
         print_and_log(make_header("Loading postconditions..."))
         all_postconditions = load_postconditions(
@@ -287,9 +316,7 @@ def main(cfg):
     )
 
     samples = []
-
-    this_postconditions = None
-
+    task_ids_to_run = []
     doRun = True
 
     if cfg.benchmarks.run_range and str(cfg.benchmarks.run_start) != "HumanEval/0":
@@ -302,29 +329,41 @@ def main(cfg):
         if not doRun:
             continue
 
-        for i in range(cfg.experiment.n_per_model_call):
-            sample = dict(
-                task_id=task_id,
-                run_num=i,
-                completion_pre=generate_one_completion(
-                    cfg.experiment,
-                    problems[task_id],
-                    task_id,
-                    i,
-                    log_only,
-                    this_postconditions,
-                ),
-            )
-
-            write_jsonl(
-                os.path.join(log.OUTPUT_FOLDER, "samples_partial.jsonl"),
-                [sample],
-                append=True,
-            )
-            samples.append(sample)
+        task_ids_to_run.append(task_id)
 
         if cfg.benchmarks.run_range and str(task_id) == str(cfg.benchmarks.run_end):
             doRun = False
+
+    worker_count = get_worker_count()
+    print_and_log(
+        make_header(
+            "Running generation with {} workers across {} problems".format(
+                worker_count, len(task_ids_to_run)
+            )
+        )
+    )
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_task_id = {
+            executor.submit(
+                generate_samples_for_problem,
+                cfg.experiment,
+                problems[task_id],
+                task_id,
+                log_only,
+                None if all_postconditions is None else all_postconditions.get(task_id),
+            ): task_id
+            for task_id in task_ids_to_run
+        }
+
+        for future in as_completed(future_to_task_id):
+            problem_samples = future.result()
+            write_jsonl(
+                os.path.join(log.OUTPUT_FOLDER, "samples_partial.jsonl"),
+                problem_samples,
+                append=True,
+            )
+            samples.extend(problem_samples)
 
     print_and_log(make_header("COMPLETED CODE GENERATION, SAVING JSONL FILE..."))
 

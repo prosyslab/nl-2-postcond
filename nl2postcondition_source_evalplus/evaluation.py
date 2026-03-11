@@ -17,6 +17,11 @@ from dataset_paths import get_evalplus_dataset_file
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
 
 
+def get_worker_count() -> int:
+    cpu_count = os.cpu_count() or 1
+    return max(1, int(cpu_count * 0.8))
+
+
 def load_dataset(dataset: str) -> dict:
     with open(dataset, "r") as f:
         d = json.load(f)
@@ -195,6 +200,13 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationR
     )
 
 
+async def evaluate_one_assertion_with_semaphore(
+    data: dict, evalplus_data: dict, semaphore: asyncio.Semaphore
+) -> EvaluationResult:
+    async with semaphore:
+        return await evaluate_one_assertion(data, evalplus_data)
+
+
 def aggregate_results(
     results: List[EvaluationResult], exp_name: str
 ) -> AggregatedResult:
@@ -225,10 +237,15 @@ def aggregate_results(
     )
 
 
-async def evaluate_target_directory(target_directory: str, dataset: str) -> List[EvaluationResult]:
+async def evaluate_target_directory(
+    target_directory: str, dataset: str, worker_count: int
+) -> List[EvaluationResult]:
     data = read_target_directory(target_directory)
     evalplus_data = load_dataset(dataset)
-    tasks = [evaluate_one_assertion(d, evalplus_data) for d in data]
+    semaphore = asyncio.Semaphore(worker_count)
+    tasks = [
+        evaluate_one_assertion_with_semaphore(d, evalplus_data, semaphore) for d in data
+    ]
     return await atqdm.gather(*tasks)
 
 
@@ -242,7 +259,11 @@ async def evaluate_target_directory(target_directory: str, dataset: str) -> List
 )
 @click.option("--exp_name", type=str, required=True)
 def main(target_directory: str, dataset: str, exp_name: str):
-    results = asyncio.run(evaluate_target_directory(target_directory, dataset))
+    worker_count = get_worker_count()
+    print(f"Running evaluation with {worker_count} workers")
+    results = asyncio.run(
+        evaluate_target_directory(target_directory, dataset, worker_count)
+    )
     with open(os.path.join(target_directory, "evaluation_results.json"), "w") as f:
         json.dump([result.model_dump() for result in results], f, indent=4)
     with open(os.path.join(target_directory, "aggregated_result.json"), "w") as f:
