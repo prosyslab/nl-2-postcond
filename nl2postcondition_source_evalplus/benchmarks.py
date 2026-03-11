@@ -2,6 +2,7 @@ import json
 import os
 
 from evalplus.data import get_human_eval_plus
+from dataset_paths import get_defects4j_dataset_file
 
 
 def load_evalplus_subset(evalplus_cfg):
@@ -81,22 +82,28 @@ def load_defects4j(benchmarks_cfg):
     Args:
         benchmarks_cfg (_type_): _description_
     """
-    bug_metadataFolder = benchmarks_cfg.location
+    bug_metadata_path = getattr(
+        benchmarks_cfg, "location", str(get_defects4j_dataset_file())
+    )
 
     to_return = []
     the_task_ids = set()
-    # Loop through the files in this path, and if they are json files, load each one
-    for root, dirs, files in os.walk(bug_metadataFolder):
-        for filename in sorted(files):
-            if filename.endswith(".json"):
-                # Load the json file
-                with open(os.path.join(root, filename), "r") as f:
-                    data = json.load(f)
-                    to_return.extend(load_defect4j_bugs(data, the_task_ids))
 
-    # to_return task ids
-    to_return_task_ids = [bug["task_id"] for bug in to_return]
-    to_return_task_ids_set = set(to_return_task_ids)
+    if os.path.isfile(bug_metadata_path):
+        with open(bug_metadata_path, "r") as f:
+            loaded = json.load(f)
+
+        dataset_items = loaded if isinstance(loaded, list) else [loaded]
+        for data in dataset_items:
+            to_return.extend(load_defect4j_bugs(data, the_task_ids))
+    else:
+        # Loop through the files in this path, and if they are json files, load each one
+        for root, _, files in os.walk(bug_metadata_path):
+            for filename in sorted(files):
+                if filename.endswith(".json"):
+                    with open(os.path.join(root, filename), "r") as f:
+                        data = json.load(f)
+                        to_return.extend(load_defect4j_bugs(data, the_task_ids))
 
     return to_return
 
