@@ -1,5 +1,6 @@
 import json
-import os
+import re
+from pathlib import Path
 
 from evalplus.data import get_human_eval_plus
 from dataset_paths import get_defects4j_dataset_file
@@ -37,75 +38,84 @@ def load_evalplus_subset(evalplus_cfg):
 
     return filtered_problems
 
+METHOD_ID_SANITIZER = re.compile(r"[^0-9A-Za-z]+")
 
-def load_defect4j_bugs(data, ids_set):
+
+def sanitize_method_identifier(text: str) -> str:
+    sanitized = METHOD_ID_SANITIZER.sub("_", text).strip("_")
+    return sanitized or "method"
+
+
+def extract_method_name(signature: str) -> str:
+    match = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", signature)
+    if match:
+        return match.group(1)
+    parts = signature.strip().split()
+    return parts[-1] if parts else "method"
+
+
+def resolve_defects4j_dataset_path(benchmarks_cfg) -> Path:
+    dataset_path = Path(
+        getattr(benchmarks_cfg, "location", str(get_defects4j_dataset_file()))
+    )
+    if dataset_path.is_dir():
+        dataset_path = dataset_path / "defects4j.json"
+    return dataset_path
+
+
+def load_expecto_defects4j_methods(bugs, limit=None):
     to_return = []
+    ids_count = {}
 
-    # Loop through all of the files that have been changed
-    task_id_base = data["project"] + "_" + data["bugid"]
+    for bug in bugs:
+        project = bug["project"]
+        bug_id = str(bug["bug_id"])
 
-    for path, results in data["method_changes_per_file"].items():
-        for result in results:
-            this_bug = {}
-            this_bug["task_id"] = (
-                task_id_base
-                + "_"
-                + path
-                + "_"
-                + "".join(result["buggy"]["signature"].split())
+        for method_dump in bug.get("method_dumps", []):
+            method_info = method_dump["method_info"]
+            method_signature = method_info["signature"]
+            method_name = extract_method_name(method_signature)
+            method_token = sanitize_method_identifier(
+                f"{method_info['file']}_{method_signature}"
             )
+            base_id = f"{project}_{bug_id}_{method_token}"
+            ids_count[base_id] = ids_count.get(base_id, 0) + 1
+            task_id = base_id
+            if ids_count[base_id] > 1:
+                task_id = f"{base_id}_{ids_count[base_id]}"
 
-            # We can skip these because these are cases when the fix involves adding a function, so only need the one "buggy one"
-            if this_bug["task_id"] in ids_set:
-                continue
-            else:
-                ids_set.add(this_bug["task_id"])
+            to_return.append(
+                {
+                    "task_id": task_id,
+                    "id": task_id,
+                    "project": project,
+                    "bug_id": bug_id,
+                    "method_name": method_name,
+                    "method_signature": method_signature,
+                    "javadoc": method_info.get("javadoc", {}),
+                    "reference_code": method_info.get("code", ""),
+                    "file": method_info.get("file", ""),
+                    "entry_schema": method_info.get("entry_schema", {}),
+                    "exit_schema": method_info.get("exit_schema", {}),
+                }
+            )
+            if limit is not None and len(to_return) >= limit:
+                return to_return
 
-            this_bug["class_context"] = result["buggy"]["preceding_class_context"]
-            this_bug["class_details"] = result["buggy"]["class_details"]
-            this_bug["relevant_class_details"] = result["buggy"][
-                "relevant_class_details"
-            ]
-            this_bug["imports"] = "\n".join(result["buggy"]["relevant_imports"])
-            this_bug["method"] = result["buggy"]["code_wo_comment"]
-            this_bug["comment"] = result["buggy"]["comment_before_code"].strip()
-            this_bug["method_stub"] = result["buggy"]["signature"]
-            this_bug["method_name"] = result["buggy"]["signature_short"]
-            this_bug["task_order"] = len(ids_set)
-            to_return.append(this_bug)
     return to_return
+
+
+def load_defects4j_method_examples(benchmarks_cfg, limit=None):
+    dataset_path = resolve_defects4j_dataset_path(benchmarks_cfg)
+    with open(dataset_path, "r") as f:
+        loaded = json.load(f)
+
+    bugs = loaded if isinstance(loaded, list) else [loaded]
+    return load_expecto_defects4j_methods(bugs, limit=limit)
 
 
 def load_defects4j(benchmarks_cfg):
-    """_summary_
-
-    Args:
-        benchmarks_cfg (_type_): _description_
-    """
-    bug_metadata_path = getattr(
-        benchmarks_cfg, "location", str(get_defects4j_dataset_file())
-    )
-
-    to_return = []
-    the_task_ids = set()
-
-    if os.path.isfile(bug_metadata_path):
-        with open(bug_metadata_path, "r") as f:
-            loaded = json.load(f)
-
-        dataset_items = loaded if isinstance(loaded, list) else [loaded]
-        for data in dataset_items:
-            to_return.extend(load_defect4j_bugs(data, the_task_ids))
-    else:
-        # Loop through the files in this path, and if they are json files, load each one
-        for root, _, files in os.walk(bug_metadata_path):
-            for filename in sorted(files):
-                if filename.endswith(".json"):
-                    with open(os.path.join(root, filename), "r") as f:
-                        data = json.load(f)
-                        to_return.extend(load_defect4j_bugs(data, the_task_ids))
-
-    return to_return
+    return load_defects4j_method_examples(benchmarks_cfg)
 
 
 def load_benchmarks(benchmarks_cfg):
