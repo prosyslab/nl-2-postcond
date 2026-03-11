@@ -5,14 +5,14 @@ import tempfile
 from textwrap import indent
 from typing import List, Optional
 
-import hydra
-import log
-from hydra.utils import to_absolute_path
+import click
 from models import (
     AggregatedResult,
     EvaluationResult,
 )
 from tqdm.asyncio import tqdm as atqdm
+
+from dataset_paths import get_evalplus_dataset_file
 
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
 
@@ -136,9 +136,7 @@ def get_total(io_pairs) -> int:
         return len(json.loads(io_pairs)["inputs"])
 
 
-async def evaluate_one_assertion(
-    data: dict, evalplus_data: dict, logger
-) -> EvaluationResult:
+async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationResult:
     assertion = data["postcondition_alone"]
     problem_idx = data["task_id"].split("/")[-1]
     problem = evalplus_data[problem_idx]
@@ -227,36 +225,29 @@ def aggregate_results(
     )
 
 
-async def evaluate_target_directory(
-    target_directory: str, dataset: str, logger
-) -> List[EvaluationResult]:
+async def evaluate_target_directory(target_directory: str, dataset: str) -> List[EvaluationResult]:
     data = read_target_directory(target_directory)
     evalplus_data = load_dataset(dataset)
-    tasks = [evaluate_one_assertion(d, evalplus_data, logger) for d in data]
+    tasks = [evaluate_one_assertion(d, evalplus_data) for d in data]
     return await atqdm.gather(*tasks)
 
 
-@hydra.main(version_base=None, config_path="./config", config_name="config")
-def main(cfg):
-    assert cfg.experiment
-    assert cfg.benchmarks
-    hydra_cfg = hydra.core.hydra_config.HydraConfig.get()
-    # Resolve paths relative to original working directory (Hydra changes CWD)
-    print_and_log, _ = log.setup_output_dir(hydra_cfg)
-    target_directory = to_absolute_path(cfg.experiment.preprocessedFolder)
-    dataset = to_absolute_path(cfg.benchmarks.location)
-
-    assert os.path.isdir(target_directory), f"Directory not found: {target_directory}"
-    assert os.path.exists(dataset), f"Dataset not found: {dataset}"
-
-    results = asyncio.run(
-        evaluate_target_directory(target_directory, dataset, print_and_log)
-    )
-    with open(os.path.join(hydra_cfg.run.dir, "evaluation_results.json"), "w") as f:
-        f.write(json.dumps([result.model_dump() for result in results], indent=4))
-    with open(os.path.join(hydra_cfg.run.dir, "aggregated_result.json"), "w") as f:
-        agg_result = aggregate_results(results, cfg.experiment.exp_name)
-        f.write(agg_result.model_dump_json(indent=4))
+@click.command()
+@click.argument("target_directory", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--dataset",
+    type=click.Path(exists=True),
+    default=str(get_evalplus_dataset_file()),
+    show_default=True,
+)
+@click.option("--exp_name", type=str, required=True)
+def main(target_directory: str, dataset: str, exp_name: str):
+    results = asyncio.run(evaluate_target_directory(target_directory, dataset))
+    with open(os.path.join(target_directory, "evaluation_results.json"), "w") as f:
+        json.dump([result.model_dump() for result in results], f, indent=4)
+    with open(os.path.join(target_directory, "aggregated_result.json"), "w") as f:
+        agg_result = aggregate_results(results, exp_name)
+        json.dump(agg_result.model_dump(), f, indent=4)
     print(agg_result)
 
 

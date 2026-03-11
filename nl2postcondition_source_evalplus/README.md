@@ -17,7 +17,7 @@ Before you use the code in this repository, you will need to
 1. This project requires Python 3.9 or later. In addition, it requires several Python packages. These can be installed by running:  ```pip install -r requirements.txt```
 
    *NOTE:* We highly recommend running all code in a virtual environment, eg:
-   
+
    ```
    # Installs virtualenv
    python3 -m pip install virtualenv
@@ -29,7 +29,7 @@ Before you use the code in this repository, you will need to
    source myNl2SpecEnv/bin/activate
    ```
 
-3. Create an .env file, and add your API Key. The code is currently implemented for the GPT3.5 azure api, and also the GPT4 OpenAi api.
+3. Create an `.env` file and add your OpenAI API key.
 
 4. Modify the configuration files as needed for the script you are running. For the configuration manager, we use [Hydra](https://hydra.cc/docs/intro/). Some sample configuration files are included in the `config` folder. However, configuration can also be modified directly at run time. Examples of the configuration options needed for each script are included in this README.
 
@@ -39,7 +39,7 @@ We now go through each of the three scripts listed above.
 
 ### llm_sample_generator
 
-This the script that can be used to generate postconditions for EvalPlus problems using an LLM. This script is currently the default in the included sample config files (using the azure api). To run it, you can call:
+This is the script that can be used to generate postconditions for EvalPlus problems using an LLM. The included sample config files use the OpenAI API. To run it, you can call:
 
 `python llm_sample_generator.py`
 
@@ -59,7 +59,7 @@ This script contains the following configuration options:
 ```
 config
     api
-        azure
+        openai
             name
             version
             base
@@ -80,7 +80,6 @@ config
             n_model_responses
             n_per_model_call
             to_generate: string saying postcondition
-            has_reference_code: bool
             prompt_v: base or simple
             system_prompt: string
 ```
@@ -100,20 +99,20 @@ Should you want to try running this script without generating postconditions fir
 
 ### run_postcondition_evaluation
 
-To do this evaluation, you will want to do it in the repository docker container. 
+To do this evaluation, you will want to do it in the repository docker container.
 
 1. First, build the docker container:
    `sudo docker build -t nl2postcondition_eval .`
 
 2. Then make a folder for the results: `mkdir dockerResults`
 
-3. Finally, run the evaluation in the docker container. For a quick run using the example preprocessed outputs included in this repository, you can use the following command: 
+3. Finally, run the evaluation in the docker container. For a quick run using the example preprocessed outputs included in this repository, you can use the following command:
 
 ```
 sudo docker run -it --mount type=bind,source="$(pwd)"/dockerResults,target=/app nl2postcondition_eval --dataset evalplus --samples-buggy-codes /evalDir/distinct_code_mutants.jsonl --samples-post-conditions /evalDir/sample_GPT4Eval --test-details --parallel $(nproc) --gt-t
 ime-limit-factor 10.0 --min-time-limit 0.5
 ```
-This command will run both the correctness and completeness evaluations (using a modified version of the evalplus evaluation handler stored in `lib`) for the sample preprocessed postconditions in `response_preprocess_outputs/sample_preprocessedGPT4simpleWithRef`, and will output these results into the folder `dockerResults/sample_GPT4Eval_evalResults_evalplus`. The [README file](../GeneratedPostconditions/README.md#evalplus) file on GeneratedPostconditions explains the output files produced. 
+This command will run both the correctness and completeness evaluations (using a modified version of the evalplus evaluation handler stored in `lib`) for the sample preprocessed postconditions in `response_preprocess_outputs/sample_preprocessedGPT4simpleWithRef`, and will output these results into the folder `dockerResults/sample_GPT4Eval_evalResults_evalplus`. The [README file](../GeneratedPostconditions/README.md#evalplus) file on GeneratedPostconditions explains the output files produced.
 
 #### Available options for postcondition evaluation script
 

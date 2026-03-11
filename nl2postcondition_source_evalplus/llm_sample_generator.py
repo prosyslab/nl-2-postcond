@@ -9,43 +9,29 @@ from textwrap import indent
 
 import hydra
 import log
-import openai
 import prompts
 from benchmarks import load_benchmarks
-from decouple import config
 from evalplus.data import write_jsonl
 from log import make_header
+from openai import OpenAI
 from omegaconf import OmegaConf
 from tenacity import retry, stop_after_attempt, wait_random_exponential
+
+CLIENT = None
 
 
 def setup_api(api_cfg, print_and_log):
     """
-    Sets up the api with the api type and API key
-    You should modify this for the specific model you are using
+    Sets up the OpenAI client.
     """
-
-    if api_cfg.name == "azure":
-        openai.api_type = api_cfg.name
-        openai.api_base = api_cfg.base
-        openai.api_version = api_cfg.version
-        openai.api_key = config(api_cfg.key)
-        assert openai.api_key != None, (
-            "API key not found. Please set the {} environment variable.".format(
-                api_cfg.key
-            )
+    global CLIENT
+    api_key = os.getenv(api_cfg.key)
+    assert api_key is not None, (
+        "API key not found. Please set the {} environment variable.".format(
+            api_cfg.key
         )
-
-    elif api_cfg.name == "openai":
-        openai.api_key = config(api_cfg.key)
-        assert openai.api_key != None, (
-            "API key not found. Please set the {} environment variable.".format(
-                api_cfg.key
-            )
-        )
-
-    else:
-        raise ValueError("Invalid API name: {}".format(api_cfg.name))
+    )
+    CLIENT = OpenAI(api_key=api_key)
 
 
 def load_postconditions(evaluated_post_conditions_file):
@@ -153,10 +139,11 @@ def ask(prompt, exper_cfg, log_only):
     """
 
     log_only("Attempting call...")
+    assert CLIENT is not None, "API client is not initialized"
     # FIXME - this is what you will need to change for the open source model
     if exper_cfg.model.startswith("gpt-3"):
-        response = openai.ChatCompletion.create(
-            engine=exper_cfg.model,
+        response = CLIENT.chat.completions.create(
+            model=exper_cfg.model,
             messages=[
                 {"role": "system", "content": exper_cfg.system_prompt},
                 {"role": "user", "content": prompt},
@@ -165,7 +152,7 @@ def ask(prompt, exper_cfg, log_only):
             n=exper_cfg.n_model_responses,
         )
     else:
-        response = openai.ChatCompletion.create(
+        response = CLIENT.chat.completions.create(
             model=exper_cfg.model,
             messages=[
                 {"role": "system", "content": exper_cfg.system_prompt},
@@ -175,7 +162,7 @@ def ask(prompt, exper_cfg, log_only):
             n=exper_cfg.n_model_responses,
         )
 
-    return response
+    return response.model_dump()
 
 
 def generate_one_completion(
@@ -305,11 +292,11 @@ def main(cfg):
 
     doRun = True
 
-    if cfg.benchmarks.run_range and cfg.benchmarks.run_start != "HumanEval/0":
+    if cfg.benchmarks.run_range and str(cfg.benchmarks.run_start) != "HumanEval/0":
         doRun = False
 
     for task_id in problems:
-        if cfg.benchmarks.run_range and task_id == cfg.benchmarks.run_start:
+        if cfg.benchmarks.run_range and str(task_id) == str(cfg.benchmarks.run_start):
             doRun = True
 
         if not doRun:
@@ -336,7 +323,7 @@ def main(cfg):
             )
             samples.append(sample)
 
-        if cfg.benchmarks.run_range and task_id == cfg.benchmarks.run_end:
+        if cfg.benchmarks.run_range and str(task_id) == str(cfg.benchmarks.run_end):
             doRun = False
 
     print_and_log(make_header("COMPLETED CODE GENERATION, SAVING JSONL FILE..."))
