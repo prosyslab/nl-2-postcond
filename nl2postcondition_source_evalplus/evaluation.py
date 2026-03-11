@@ -1,6 +1,9 @@
 import asyncio
+import contextlib
 import json
 import os
+import subprocess
+import sys
 import tempfile
 from textwrap import indent
 from typing import List, Optional
@@ -15,11 +18,35 @@ from tqdm.asyncio import tqdm as atqdm
 from dataset_paths import get_evalplus_dataset_file
 
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
+EVAL_TIMEOUT_SECONDS = 30
+
+if hasattr(sys, "set_int_max_str_digits"):
+    # EvalPlus fixtures can contain very large integers inside JSON payloads.
+    sys.set_int_max_str_digits(0)
 
 
 def get_worker_count() -> int:
     cpu_count = os.cpu_count() or 1
     return max(1, int(cpu_count * 0.8))
+
+
+def sanitize_task_id(task_id: str) -> str:
+    return task_id.replace("/", "__")
+
+
+def get_log_path(
+    target_directory: str,
+    task_id: str,
+    response_num: int,
+    phase: str,
+    stream_name: str,
+) -> str:
+    log_dir = os.path.join(target_directory, "evaluation_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    return os.path.join(
+        log_dir,
+        f"{sanitize_task_id(task_id)}__sample_{response_num}__{phase}.{stream_name}.log",
+    )
 
 
 def load_dataset(dataset: str) -> dict:
@@ -95,43 +122,81 @@ def get_eval_code(assertion: str, signature: str, args, parser: Optional[str]) -
         return get_eval_code_with_io_pairs(assertion, signature, args)
 
 
-async def run_code(code: str, num_of_tc: int) -> tuple[int, int, int, str]:
+def write_log(path: str, content: str) -> None:
+    with open(path, "w", encoding="utf-8") as log_file:
+        log_file.write(content)
+
+
+def normalize_output(content: bytes | str | None) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, bytes):
+        return content.decode("utf-8", errors="replace")
+    return content
+
+
+def run_code_sync(
+    code: str, num_of_tc: int, stdout_log_path: str, stderr_log_path: str
+) -> tuple[int, int, int, str]:
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".py") as tmp:
         tmp.write(code)
         tmp.flush()
         tmp_path = tmp.name
-        proc = await asyncio.subprocess.create_subprocess_exec(
-            "python3",
-            tmp_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=30)
-        except asyncio.TimeoutError:
-            try:
-                proc.terminate()
-                await proc.wait()
-            except ProcessLookupError:
-                pass
-            return 0, 0, num_of_tc, "Timeout"
-        if proc.stdout is None:
-            return 0, 0, num_of_tc, "No stdout"
-        stdout = await proc.stdout.read()
-        stderr = await proc.stderr.read() if proc.stderr else b""
-        if stderr:
-            return 0, 0, num_of_tc, stderr.decode(errors="replace").strip()
 
-        stdout_str = stdout.decode().strip()
+    try:
+        try:
+            completed = subprocess.run(
+                ["python3", tmp_path],
+                capture_output=True,
+                text=True,
+                timeout=EVAL_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            write_log(stdout_log_path, normalize_output(exc.stdout))
+            write_log(stderr_log_path, normalize_output(exc.stderr) + "Timeout\n")
+            return 0, 0, num_of_tc, f"Timeout. See logs: {stdout_log_path}, {stderr_log_path}"
+
+        write_log(stdout_log_path, completed.stdout)
+        if completed.stderr:
+            write_log(stderr_log_path, completed.stderr)
+        elif os.path.exists(stderr_log_path):
+            os.unlink(stderr_log_path)
+
+        if completed.returncode != 0:
+            return (
+                0,
+                0,
+                num_of_tc,
+                "Process exited with code "
+                f"{completed.returncode}. See logs: {stdout_log_path}, {stderr_log_path}",
+            )
+
+        stdout_str = completed.stdout.strip()
         if not stdout_str:
-            return 0, 0, num_of_tc, "No stdout"
+            return 0, 0, num_of_tc, f"No stdout. See logs: {stdout_log_path}, {stderr_log_path}"
 
         processed = stdout_str.split()
-
         if len(processed) != 3:
-            return 0, 0, num_of_tc, f"Invalid stdout format: {stdout_str}"
+            return (
+                0,
+                0,
+                num_of_tc,
+                f"Invalid stdout format: {stdout_str}. See logs: {stdout_log_path}, {stderr_log_path}",
+            )
 
         return int(processed[0]), int(processed[1]), int(processed[2]), "Success"
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_path)
+
+
+async def run_code(
+    code: str, num_of_tc: int, stdout_log_path: str, stderr_log_path: str
+) -> tuple[int, int, int, str]:
+    return await asyncio.to_thread(
+        run_code_sync, code, num_of_tc, stdout_log_path, stderr_log_path
+    )
 
 
 def get_total(io_pairs) -> int:
@@ -141,8 +206,12 @@ def get_total(io_pairs) -> int:
         return len(json.loads(io_pairs)["inputs"])
 
 
-async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationResult:
+async def evaluate_one_assertion(
+    data: dict, evalplus_data: dict, target_directory: str
+) -> EvaluationResult:
     assertion = data["postcondition_alone"]
+    task_id = data["task_id"]
+    response_num = data.get("response_num", 0)
     problem_idx = data["task_id"].split("/")[-1]
     problem = evalplus_data[problem_idx]
 
@@ -153,12 +222,23 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationR
     complete_total = get_total(problem["input_output"])
     if complete_total == 0:
         complete_total = 1
+    complete_stdout_log_path = get_log_path(
+        target_directory, task_id, response_num, "completeness", "stdout"
+    )
+    complete_stderr_log_path = get_log_path(
+        target_directory, task_id, response_num, "completeness", "stderr"
+    )
     (
         true_cnt_correct,
         false_cnt_correct,
         error_cnt_correct,
         msg_completeness,
-    ) = await run_code(eval_code, complete_total)
+    ) = await run_code(
+        eval_code,
+        complete_total,
+        complete_stdout_log_path,
+        complete_stderr_log_path,
+    )
 
     # Check soundness
     eval_code = get_eval_code(
@@ -170,6 +250,12 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationR
     sound_total = get_total(problem["mutated_input_output"])
     if sound_total == 0:
         sound_total = 1
+    soundness_stdout_log_path = get_log_path(
+        target_directory, task_id, response_num, "soundness", "stdout"
+    )
+    soundness_stderr_log_path = get_log_path(
+        target_directory, task_id, response_num, "soundness", "stderr"
+    )
     (
         true_cnt_mutated,
         false_cnt_mutated,
@@ -178,6 +264,8 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationR
     ) = await run_code(
         eval_code,
         sound_total,
+        soundness_stdout_log_path,
+        soundness_stderr_log_path,
     )
 
     return EvaluationResult(
@@ -201,10 +289,13 @@ async def evaluate_one_assertion(data: dict, evalplus_data: dict) -> EvaluationR
 
 
 async def evaluate_one_assertion_with_semaphore(
-    data: dict, evalplus_data: dict, semaphore: asyncio.Semaphore
+    data: dict,
+    evalplus_data: dict,
+    target_directory: str,
+    semaphore: asyncio.Semaphore,
 ) -> EvaluationResult:
     async with semaphore:
-        return await evaluate_one_assertion(data, evalplus_data)
+        return await evaluate_one_assertion(data, evalplus_data, target_directory)
 
 
 def aggregate_results(
@@ -244,7 +335,10 @@ async def evaluate_target_directory(
     evalplus_data = load_dataset(dataset)
     semaphore = asyncio.Semaphore(worker_count)
     tasks = [
-        evaluate_one_assertion_with_semaphore(d, evalplus_data, semaphore) for d in data
+        evaluate_one_assertion_with_semaphore(
+            d, evalplus_data, target_directory, semaphore
+        )
+        for d in data
     ]
     return await atqdm.gather(*tasks)
 
@@ -258,8 +352,16 @@ async def evaluate_target_directory(
     show_default=True,
 )
 @click.option("--exp_name", type=str, required=True)
-def main(target_directory: str, dataset: str, exp_name: str):
-    worker_count = get_worker_count()
+@click.option(
+    "--workers",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Maximum number of concurrent assertion evaluations.",
+)
+def main(
+    target_directory: str, dataset: str, exp_name: str, workers: Optional[int]
+):
+    worker_count = workers or get_worker_count()
     print(f"Running evaluation with {worker_count} workers")
     results = asyncio.run(
         evaluate_target_directory(target_directory, dataset, worker_count)
