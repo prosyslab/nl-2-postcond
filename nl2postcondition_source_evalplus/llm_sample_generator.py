@@ -16,14 +16,24 @@ from evalplus.data import write_jsonl
 from log import make_header
 from openai import OpenAI
 from omegaconf import OmegaConf
-from tenacity import retry, stop_after_attempt, wait_random_exponential
+from tenacity import Retrying, stop_after_attempt, wait_random_exponential
 
 CLIENT = None
+DEFAULT_API_TIMEOUT_SECONDS = 120
+DEFAULT_MAX_API_RETRIES = 8
+MAX_GENERATION_WORKERS = 8
 
 
 def get_worker_count() -> int:
     cpu_count = os.cpu_count() or 1
-    return max(1, int(cpu_count * 0.8))
+    return max(1, min(MAX_GENERATION_WORKERS, int(cpu_count * 0.8)))
+
+
+def get_positive_int(cfg, key: str, default: int) -> int:
+    value = cfg.get(key, default)
+    if value is None:
+        return default
+    return max(1, int(value))
 
 
 def setup_api(api_cfg, print_and_log):
@@ -138,36 +148,54 @@ def prepare_prompt(exper_cfg, problem) -> str:
         )
 
 
-@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(2000))
 def ask(prompt, exper_cfg, log_only):
     """
     This function returns the response from the API call - can be modified to support additional models
     """
 
-    log_only("Attempting call...")
     assert CLIENT is not None, "API client is not initialized"
-    # FIXME - this is what you will need to change for the open source model
-    if exper_cfg.model.startswith("gpt-3"):
-        response = CLIENT.chat.completions.create(
-            model=exper_cfg.model,
-            messages=[
-                {"role": "system", "content": exper_cfg.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=exper_cfg.temperature,
-            n=exper_cfg.n_model_responses,
-        )
-    else:
-        response = CLIENT.chat.completions.create(
-            model=exper_cfg.model,
-            messages=[
-                {"role": "system", "content": exper_cfg.system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=exper_cfg.temperature,
-            n=exper_cfg.n_model_responses,
-        )
+    max_api_retries = get_positive_int(
+        exper_cfg, "max_api_retries", DEFAULT_MAX_API_RETRIES
+    )
+    api_timeout_seconds = get_positive_int(
+        exper_cfg, "api_timeout_seconds", DEFAULT_API_TIMEOUT_SECONDS
+    )
+    response = None
 
+    request_kwargs = dict(
+        model=exper_cfg.model,
+        messages=[
+            {"role": "system", "content": exper_cfg.system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=exper_cfg.temperature,
+        n=exper_cfg.n_model_responses,
+        timeout=api_timeout_seconds,
+    )
+
+    for attempt in Retrying(
+        wait=wait_random_exponential(min=1, max=60),
+        stop=stop_after_attempt(max_api_retries),
+        reraise=True,
+    ):
+        attempt_number = attempt.retry_state.attempt_number
+        log_only(
+            "Attempting call ({}/{}, timeout={}s)...".format(
+                attempt_number, max_api_retries, api_timeout_seconds
+            )
+        )
+        with attempt:
+            try:
+                response = CLIENT.chat.completions.create(**request_kwargs)
+            except Exception as exc:
+                log_only(
+                    "API call failed on attempt {}/{}: {}".format(
+                        attempt_number, max_api_retries, exc
+                    )
+                )
+                raise
+
+    assert response is not None, "API call did not return a response"
     return response.model_dump()
 
 
@@ -198,7 +226,11 @@ def generate_one_completion(
         )
         log_only("Error for {}: {}".format(task_id, str(e)))
         log_only("\n\n\n")
-        log_only("Even with retries, not able to generate for " + task_id, str(e))
+        log_only(
+            "Even with retries, not able to generate for {}: {}".format(
+                task_id, str(e)
+            )
+        )
         return None
 
     # Log the response
@@ -221,6 +253,7 @@ def generate_one_completion(
     # Make human readable files as a byproduct
     # First, a human readable file for each response
     program_dir = os.path.join(log.OUTPUT_FOLDER, log.SUB_FOLDER)
+    os.makedirs(program_dir, exist_ok=True)
     print(log.OUTPUT_FOLDER, log.SUB_FOLDER)
     for i in range(len(response["choices"])):
         file_base = task_id.replace("/", "_") + "_" + exper_cfg.to_generate + "_"
