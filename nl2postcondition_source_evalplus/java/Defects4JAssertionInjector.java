@@ -28,6 +28,10 @@ public final class Defects4JAssertionInjector {
     private static final String INTERNAL_RETURN_VALUE = "__nl2postcond_returnValue";
     private static final String ASSERTION_MARKER = "__NL2POSTCOND_ASSERTION_MARKER__";
     private static final Pattern ASSERT_KEYWORD = Pattern.compile("\\bassert\\b");
+    private static final Pattern RETURN_VALUE_IDENTIFIER = Pattern.compile("\\breturnValue\\b");
+    private static final Pattern LEADING_MODIFIER_PATTERN = Pattern.compile(
+        "^(?:public|protected|private|static|final|abstract|synchronized|native|strictfp|default)\\b\\s*"
+    );
 
     private Defects4JAssertionInjector() {}
 
@@ -58,18 +62,25 @@ public final class Defects4JAssertionInjector {
             throw new IllegalStateException("Target executable has no body");
         }
 
-        String rewrittenAssertion = buildInstrumentedAssertion(assertionText);
         String executableKind;
         if (executable instanceof CtConstructor<?>) {
             executableKind = "constructor";
+            String rewrittenAssertion = buildInstrumentedAssertion(
+                replaceReturnValueIdentifier(assertionText, "this")
+            );
             rewriteConstructor((CtConstructor<?>) executable, rewrittenAssertion, launcher.getFactory());
         } else if (executable instanceof CtMethod<?>) {
             CtMethod<?> method = (CtMethod<?>) executable;
             if (isVoidMethod(method)) {
                 executableKind = "void_method";
+                validateVoidAssertion(assertionText);
+                String rewrittenAssertion = buildInstrumentedAssertion(assertionText);
                 rewriteVoidMethod(method, rewrittenAssertion, launcher.getFactory());
             } else {
                 executableKind = "method";
+                String rewrittenAssertion = buildInstrumentedAssertion(
+                    replaceReturnValueIdentifier(assertionText, INTERNAL_RETURN_VALUE)
+                );
                 rewriteNonVoidMethod(method, rewrittenAssertion, launcher.getFactory());
             }
         } else {
@@ -99,86 +110,157 @@ public final class Defects4JAssertionInjector {
         String relativeFile,
         String rawSignature
     ) {
-        SignatureParts signature = SignatureParts.parse(rawSignature);
-        List<CtExecutable<?>> matches = new ArrayList<>();
+        SignatureSelector selector = SignatureSelector.parse(rawSignature);
+        List<ExecutableCandidate> candidates = collectExecutableCandidates(model, relativeFile);
+
+        List<ExecutableCandidate> directMatches = findCanonicalMatches(
+            candidates,
+            selector.canonicalSignature
+        );
+        if (directMatches.size() == 1) {
+            return directMatches.get(0).executable;
+        }
+        if (directMatches.size() > 1) {
+            throw new IllegalStateException(
+                buildAmbiguousResolutionMessage(rawSignature, relativeFile, "direct canonical match", directMatches)
+            );
+        }
+
+        if (!selector.packageInsensitiveCanonicalSignature.equals(selector.canonicalSignature)) {
+            List<ExecutableCandidate> packageInsensitiveMatches = findCanonicalMatches(
+                candidates,
+                selector.packageInsensitiveCanonicalSignature
+            );
+            if (packageInsensitiveMatches.size() == 1) {
+                return packageInsensitiveMatches.get(0).executable;
+            }
+            if (packageInsensitiveMatches.size() > 1) {
+                throw new IllegalStateException(
+                    buildAmbiguousResolutionMessage(
+                        rawSignature,
+                        relativeFile,
+                        "package-insensitive canonical match",
+                        packageInsensitiveMatches
+                    )
+                );
+            }
+        }
+
+        List<ExecutableCandidate> nameArityMatches = findNameArityMatches(candidates, selector);
+        if (nameArityMatches.size() == 1) {
+            return nameArityMatches.get(0).executable;
+        }
+        if (nameArityMatches.size() > 1) {
+            throw new IllegalStateException(
+                buildAmbiguousResolutionMessage(rawSignature, relativeFile, "name+arity fallback", nameArityMatches)
+            );
+        }
+
+        List<ExecutableCandidate> nameMatches = findNameMatches(candidates, selector.executableName);
+        if (nameMatches.size() == 1) {
+            return nameMatches.get(0).executable;
+        }
+        if (nameMatches.size() > 1) {
+            throw new IllegalStateException(
+                buildAmbiguousResolutionMessage(rawSignature, relativeFile, "name-only fallback", nameMatches)
+            );
+        }
+
+        throw new IllegalStateException(
+            "Unable to resolve executable for " + rawSignature + " in " + relativeFile
+                + "; available candidates: " + summarizeCandidates(candidates)
+        );
+    }
+
+    private static List<ExecutableCandidate> collectExecutableCandidates(
+        CtModel model,
+        String relativeFile
+    ) {
+        List<ExecutableCandidate> candidates = new ArrayList<>();
 
         for (CtMethod<?> method : model.getElements(new TypeFilter<>(CtMethod.class))) {
-            if (!sameRelativeFile(method, relativeFile)) {
-                continue;
-            }
-            if (matchesMethod(method, signature)) {
-                matches.add(method);
+            if (sameRelativeFile(method, relativeFile)) {
+                candidates.add(ExecutableCandidate.from(method));
             }
         }
 
         for (CtConstructor<?> constructor : model.getElements(new TypeFilter<>(CtConstructor.class))) {
-            if (!sameRelativeFile(constructor, relativeFile)) {
-                continue;
-            }
-            if (matchesConstructor(constructor, signature)) {
-                matches.add(constructor);
+            if (sameRelativeFile(constructor, relativeFile)) {
+                candidates.add(ExecutableCandidate.from(constructor));
             }
         }
 
-        if (matches.size() != 1) {
-            throw new IllegalStateException(
-                "Expected exactly one executable for " + rawSignature + " in " + relativeFile
-                    + ", found " + matches.size()
-            );
-        }
-        return matches.get(0);
+        return candidates;
     }
 
-    private static boolean matchesMethod(CtMethod<?> method, SignatureParts signature) {
-        if (signature.constructor) {
-            return false;
-        }
-        if (!method.getSimpleName().equals(signature.executableName)) {
-            return false;
-        }
-        return parametersMatch(method, signature.parameterTypes);
-    }
-
-    private static boolean matchesConstructor(
-        CtConstructor<?> constructor,
-        SignatureParts signature
+    private static List<ExecutableCandidate> findCanonicalMatches(
+        List<ExecutableCandidate> candidates,
+        String expectedCanonicalSignature
     ) {
-        if (!signature.constructor) {
-            return false;
-        }
-        if (constructor.getDeclaringType() == null) {
-            return false;
-        }
-        if (!constructor.getDeclaringType().getSimpleName().equals(signature.executableName)) {
-            return false;
-        }
-        return parametersMatch(constructor, signature.parameterTypes);
-    }
-
-    private static boolean parametersMatch(
-        CtExecutable<?> executable,
-        List<String> expectedParameterTypes
-    ) {
-        List<CtParameter<?>> parameters = executable.getParameters();
-        if (parameters.size() != expectedParameterTypes.size()) {
-            return false;
-        }
-
-        for (int index = 0; index < parameters.size(); index++) {
-            String actual = normalizeType(parameters.get(index).getType());
-            String expected = expectedParameterTypes.get(index);
-            if (!typeMatches(actual, expected)) {
-                return false;
+        List<ExecutableCandidate> matches = new ArrayList<>();
+        for (ExecutableCandidate candidate : candidates) {
+            if (candidate.canonicalSignature.equals(expectedCanonicalSignature)
+                || candidate.packageInsensitiveCanonicalSignature.equals(expectedCanonicalSignature)) {
+                matches.add(candidate);
             }
         }
-        return true;
+        return matches;
     }
 
-    private static boolean typeMatches(String actual, String expected) {
-        if (actual.equals(expected)) {
-            return true;
+    private static List<ExecutableCandidate> findNameArityMatches(
+        List<ExecutableCandidate> candidates,
+        SignatureSelector selector
+    ) {
+        List<ExecutableCandidate> matches = new ArrayList<>();
+        for (ExecutableCandidate candidate : candidates) {
+            if (candidate.executableName.equals(selector.executableName)
+                && candidate.arity == selector.arity) {
+                matches.add(candidate);
+            }
         }
-        return stripPackages(actual).equals(stripPackages(expected));
+        return matches;
+    }
+
+    private static List<ExecutableCandidate> findNameMatches(
+        List<ExecutableCandidate> candidates,
+        String executableName
+    ) {
+        List<ExecutableCandidate> matches = new ArrayList<>();
+        for (ExecutableCandidate candidate : candidates) {
+            if (candidate.executableName.equals(executableName)) {
+                matches.add(candidate);
+            }
+        }
+        return matches;
+    }
+
+    private static String buildAmbiguousResolutionMessage(
+        String rawSignature,
+        String relativeFile,
+        String resolutionStage,
+        List<ExecutableCandidate> matches
+    ) {
+        return "Ambiguous executable match for " + rawSignature + " in " + relativeFile
+            + " via " + resolutionStage + ": " + summarizeCandidates(matches);
+    }
+
+    private static String summarizeCandidates(List<ExecutableCandidate> candidates) {
+        if (candidates.isEmpty()) {
+            return "(none)";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        int limit = Math.min(candidates.size(), 8);
+        for (int index = 0; index < limit; index++) {
+            if (index > 0) {
+                builder.append(", ");
+            }
+            builder.append(candidates.get(index).canonicalSignature);
+        }
+        if (candidates.size() > limit) {
+            builder.append(", ... total=").append(candidates.size());
+        }
+        return builder.toString();
     }
 
     private static boolean sameRelativeFile(CtElement element, String relativeFile) {
@@ -191,13 +273,182 @@ public final class Defects4JAssertionInjector {
         return actual.endsWith("/" + expected) || actual.equals(expected);
     }
 
+    private static String stripLeadingDecorations(String value) {
+        String normalized = value.trim();
+
+        while (true) {
+            if (normalized.startsWith("@")) {
+                String stripped = stripLeadingAnnotation(normalized);
+                if (stripped.equals(normalized)) {
+                    break;
+                }
+                normalized = stripped.trim();
+                continue;
+            }
+
+            String strippedComment = stripLeadingComment(normalized);
+            if (!strippedComment.equals(normalized)) {
+                normalized = strippedComment.trim();
+                continue;
+            }
+            break;
+        }
+
+        while (true) {
+            Matcher modifierMatch = LEADING_MODIFIER_PATTERN.matcher(normalized);
+            if (!modifierMatch.find()) {
+                break;
+            }
+            normalized = normalized.substring(modifierMatch.end()).trim();
+        }
+
+        return normalized;
+    }
+
+    private static String stripLeadingAnnotation(String value) {
+        int annotationEnd = skipAnnotation(value, 0);
+        if (annotationEnd <= 0) {
+            return value;
+        }
+        return value.substring(annotationEnd);
+    }
+
+    private static String stripLeadingComment(String value) {
+        if (value.startsWith("//")) {
+            int newlineIndex = value.indexOf('\n');
+            return newlineIndex < 0 ? "" : value.substring(newlineIndex + 1);
+        }
+        if (value.startsWith("/*")) {
+            int commentEnd = value.indexOf("*/");
+            return commentEnd < 0 ? value : value.substring(commentEnd + 2);
+        }
+        return value;
+    }
+
+    private static String stripLeadingTypeParameters(String value) {
+        String normalized = value.trim();
+        if (!normalized.startsWith("<")) {
+            return normalized;
+        }
+
+        int endIndex = findMatchingBracket(normalized, 0, '<', '>');
+        if (endIndex < 0) {
+            return normalized;
+        }
+        return normalized.substring(endIndex).trim();
+    }
+
+    private static int skipAnnotation(String value, int startIndex) {
+        if (startIndex >= value.length() || value.charAt(startIndex) != '@') {
+            return -1;
+        }
+
+        int index = startIndex + 1;
+        if (index >= value.length() || !isAnnotationIdentifierStart(value.charAt(index))) {
+            return -1;
+        }
+
+        index++;
+        while (index < value.length() && isAnnotationIdentifierPart(value.charAt(index))) {
+            index++;
+        }
+
+        while (index < value.length() && Character.isWhitespace(value.charAt(index))) {
+            index++;
+        }
+
+        if (index < value.length() && value.charAt(index) == '(') {
+            int endIndex = findMatchingBracket(value, index, '(', ')');
+            if (endIndex < 0) {
+                return -1;
+            }
+            index = endIndex;
+        }
+
+        return index;
+    }
+
+    private static int findMatchingBracket(
+        String value,
+        int startIndex,
+        char openBracket,
+        char closeBracket
+    ) {
+        int depth = 0;
+        int index = startIndex;
+        while (index < value.length()) {
+            char current = value.charAt(index);
+            if (current == '\'' || current == '"') {
+                index = skipQuotedLiteral(value, index);
+                continue;
+            }
+            if (current == openBracket) {
+                depth++;
+            } else if (current == closeBracket) {
+                depth--;
+                if (depth == 0) {
+                    return index + 1;
+                }
+            }
+            index++;
+        }
+        return -1;
+    }
+
+    private static int skipQuotedLiteral(String value, int quoteIndex) {
+        char quote = value.charAt(quoteIndex);
+        int index = quoteIndex + 1;
+        while (index < value.length()) {
+            char current = value.charAt(index);
+            if (current == '\\') {
+                index += 2;
+                continue;
+            }
+            if (current == quote) {
+                return index;
+            }
+            index++;
+        }
+        return value.length() - 1;
+    }
+
+    private static boolean isAnnotationIdentifierStart(char value) {
+        return Character.isLetter(value) || value == '_';
+    }
+
+    private static boolean isAnnotationIdentifierPart(char value) {
+        return Character.isLetterOrDigit(value) || value == '_' || value == '.' || value == '$';
+    }
+
+    private static String simpleExecutableName(String value) {
+        String normalized = value.trim();
+        int separatorIndex = Math.max(normalized.lastIndexOf('.'), normalized.lastIndexOf('$'));
+        if (separatorIndex < 0) {
+            return normalized;
+        }
+        return normalized.substring(separatorIndex + 1);
+    }
+
     private static String buildInstrumentedAssertion(String assertionText) {
-        String replaced = assertionText.replaceAll("\\breturnValue\\b", INTERNAL_RETURN_VALUE);
-        Matcher matcher = ASSERT_KEYWORD.matcher(replaced);
+        Matcher matcher = ASSERT_KEYWORD.matcher(assertionText);
         if (!matcher.find()) {
             throw new IllegalStateException("Assertion text does not contain an assert statement");
         }
         return matcher.replaceFirst("/* " + ASSERTION_MARKER + " */ assert");
+    }
+
+    private static String replaceReturnValueIdentifier(String assertionText, String replacement) {
+        return RETURN_VALUE_IDENTIFIER
+            .matcher(assertionText)
+            .replaceAll(Matcher.quoteReplacement(replacement));
+    }
+
+    private static void validateVoidAssertion(String assertionText) {
+        if (RETURN_VALUE_IDENTIFIER.matcher(assertionText).find()) {
+            throw new IllegalStateException(
+                "Void-method assertions must not reference returnValue"
+            );
+        }
     }
 
     private static void rewriteVoidMethod(
@@ -207,14 +458,6 @@ public final class Defects4JAssertionInjector {
     ) {
         CtBlock<?> originalBody = method.getBody();
         CtBlock<?> newBody = factory.createBlock();
-        if (method.isStatic()) {
-            newBody.addStatement(createSnippet(factory, "Object " + INTERNAL_RETURN_VALUE + " = null;"));
-        } else {
-            String typeName = method.getDeclaringType().getReference().getQualifiedName();
-            newBody.addStatement(
-                createSnippet(factory, typeName + " " + INTERNAL_RETURN_VALUE + " = this;")
-            );
-        }
         newBody.addStatement(createSnippet(factory, assertionText));
         for (CtStatement statement : originalBody.getStatements()) {
             newBody.addStatement(statement.clone());
@@ -232,10 +475,6 @@ public final class Defects4JAssertionInjector {
         for (CtStatement statement : originalBody.getStatements()) {
             newBody.addStatement(statement.clone());
         }
-        String typeName = constructor.getDeclaringType().getReference().getQualifiedName();
-        newBody.addStatement(
-            createSnippet(factory, typeName + " " + INTERNAL_RETURN_VALUE + " = this;")
-        );
         newBody.addStatement(createSnippet(factory, assertionText));
         constructor.setBody((CtBlock) newBody);
     }
@@ -318,13 +557,29 @@ public final class Defects4JAssertionInjector {
     }
 
     private static String normalizeType(String raw) {
-        String normalized = raw.trim().replace("...", "[]");
-        normalized = normalized.replaceAll("@[A-Za-z0-9_$.]+", "");
-        normalized = normalized.replace("final ", "");
+        String normalized = stripAllAnnotations(raw).trim().replace("...", "[]");
+        normalized = normalized.replaceAll("\\bfinal\\b", "");
         normalized = normalized.replace("? extends ", "?");
         normalized = normalized.replace("? super ", "?");
         normalized = normalized.replaceAll("\\s+", "");
         return normalized;
+    }
+
+    private static String stripAllAnnotations(String raw) {
+        StringBuilder builder = new StringBuilder();
+        int index = 0;
+        while (index < raw.length()) {
+            if (raw.charAt(index) == '@') {
+                int annotationEnd = skipAnnotation(raw, index);
+                if (annotationEnd > index) {
+                    index = annotationEnd;
+                    continue;
+                }
+            }
+            builder.append(raw.charAt(index));
+            index++;
+        }
+        return builder.toString();
     }
 
     private static String stripPackages(String value) {
@@ -421,38 +676,87 @@ public final class Defects4JAssertionInjector {
         }
     }
 
-    private static final class SignatureParts {
-        private final boolean constructor;
+    private static final class SignatureSelector {
+        private final String canonicalSignature;
+        private final String packageInsensitiveCanonicalSignature;
         private final String executableName;
-        private final List<String> parameterTypes;
+        private final int arity;
 
-        private SignatureParts(boolean constructor, String executableName, List<String> parameterTypes) {
-            this.constructor = constructor;
+        private SignatureSelector(
+            String canonicalSignature,
+            String packageInsensitiveCanonicalSignature,
+            String executableName,
+            int arity
+        ) {
+            this.canonicalSignature = canonicalSignature;
+            this.packageInsensitiveCanonicalSignature = packageInsensitiveCanonicalSignature;
             this.executableName = executableName;
-            this.parameterTypes = parameterTypes;
+            this.arity = arity;
         }
 
-        private static SignatureParts parse(String rawSignature) {
-            int openParen = rawSignature.indexOf('(');
-            int closeParen = rawSignature.lastIndexOf(')');
+        private static SignatureSelector parse(String rawSignature) {
+            String normalized = stripLeadingDecorations(rawSignature);
+            normalized = stripLeadingTypeParameters(normalized);
+            int closeParen = normalized.lastIndexOf(')');
+            if (closeParen >= 0) {
+                normalized = normalized.substring(0, closeParen + 1).trim();
+            }
+
+            int openParen = normalized.indexOf('(');
             if (openParen < 0 || closeParen < openParen) {
                 throw new IllegalArgumentException("Invalid signature: " + rawSignature);
             }
 
-            String prefix = rawSignature.substring(0, openParen).trim();
-            String parameters = rawSignature.substring(openParen + 1, closeParen).trim();
-            boolean constructor = !prefix.contains(" ");
-            String executableName = constructor
+            String prefix = normalized.substring(0, openParen).trim();
+            String parameters = normalized.substring(openParen + 1, closeParen).trim();
+            int separatorIndex = findLastTypeSeparator(prefix);
+            String executableToken = separatorIndex < 0
                 ? prefix
-                : prefix.substring(prefix.lastIndexOf(' ') + 1);
+                : prefix.substring(separatorIndex + 1).trim();
+            String executableName = simpleExecutableName(executableToken);
+            String returnType = separatorIndex < 0
+                ? ""
+                : normalizeType(prefix.substring(0, separatorIndex).trim());
 
-            List<String> parameterTypes = new ArrayList<>();
+            List<ParameterDescriptor> parameterDescriptors = new ArrayList<>();
             if (!parameters.isEmpty()) {
                 for (String parameter : splitTopLevel(parameters)) {
-                    parameterTypes.add(normalizeType(removeParameterName(parameter)));
+                    parameterDescriptors.add(ParameterDescriptor.parse(parameter));
                 }
             }
-            return new SignatureParts(constructor, executableName, parameterTypes);
+
+            return new SignatureSelector(
+                buildCanonicalSignature(returnType, executableName, parameterDescriptors, false),
+                buildCanonicalSignature(returnType, executableName, parameterDescriptors, true),
+                executableName,
+                parameterDescriptors.size()
+            );
+        }
+
+        private static String buildCanonicalSignature(
+            String returnType,
+            String executableName,
+            List<ParameterDescriptor> parameterDescriptors,
+            boolean packageInsensitive
+        ) {
+            StringBuilder builder = new StringBuilder();
+            String canonicalReturnType = packageInsensitive ? stripPackages(returnType) : returnType;
+            if (!canonicalReturnType.isEmpty()) {
+                builder.append(canonicalReturnType);
+            }
+            builder.append(executableName).append("(");
+            for (int index = 0; index < parameterDescriptors.size(); index++) {
+                if (index > 0) {
+                    builder.append(",");
+                }
+                builder.append(
+                    packageInsensitive
+                        ? parameterDescriptors.get(index).packageInsensitiveCanonicalDeclaration
+                        : parameterDescriptors.get(index).canonicalDeclaration
+                );
+            }
+            builder.append(")");
+            return builder.toString();
         }
 
         private static List<String> splitTopLevel(String parameters) {
@@ -494,17 +798,9 @@ public final class Defects4JAssertionInjector {
             return values;
         }
 
-        private static String removeParameterName(String rawParameter) {
-            String parameter = rawParameter.trim();
-            int lastSpaceIndex = findLastTypeSeparator(parameter);
-            if (lastSpaceIndex < 0) {
-                return parameter;
-            }
-            return parameter.substring(0, lastSpaceIndex).trim();
-        }
-
         private static int findLastTypeSeparator(String parameter) {
             int genericDepth = 0;
+            int arrayDepth = 0;
             int parenthesesDepth = 0;
             for (int index = parameter.length() - 1; index >= 0; index--) {
                 char current = parameter.charAt(index);
@@ -512,17 +808,105 @@ public final class Defects4JAssertionInjector {
                     genericDepth++;
                 } else if (current == '<') {
                     genericDepth--;
+                } else if (current == ']') {
+                    arrayDepth++;
+                } else if (current == '[') {
+                    arrayDepth--;
                 } else if (current == ')') {
                     parenthesesDepth++;
                 } else if (current == '(') {
                     parenthesesDepth--;
                 } else if (Character.isWhitespace(current)
                     && genericDepth == 0
+                    && arrayDepth == 0
                     && parenthesesDepth == 0) {
                     return index;
                 }
             }
             return -1;
+        }
+    }
+
+    private static final class ParameterDescriptor {
+        private final String canonicalDeclaration;
+        private final String packageInsensitiveCanonicalDeclaration;
+
+        private ParameterDescriptor(
+            String canonicalDeclaration,
+            String packageInsensitiveCanonicalDeclaration
+        ) {
+            this.canonicalDeclaration = canonicalDeclaration;
+            this.packageInsensitiveCanonicalDeclaration = packageInsensitiveCanonicalDeclaration;
+        }
+
+        private static ParameterDescriptor parse(String rawParameter) {
+            String normalized = stripLeadingDecorations(rawParameter);
+            int separatorIndex = SignatureSelector.findLastTypeSeparator(normalized);
+            String typePart = separatorIndex < 0 ? normalized : normalized.substring(0, separatorIndex).trim();
+            String namePart = separatorIndex < 0 ? "" : normalized.substring(separatorIndex + 1).trim();
+
+            String canonicalType = normalizeType(typePart);
+            String canonicalName = namePart.replaceAll("\\s+", "");
+            return new ParameterDescriptor(
+                canonicalType + canonicalName,
+                stripPackages(canonicalType) + canonicalName
+            );
+        }
+
+        private static ParameterDescriptor fromParameter(CtParameter<?> parameter) {
+            String typeText = parameter.getType() == null ? "" : parameter.getType().toString();
+            String nameText = parameter.getSimpleName();
+            return parse(typeText + " " + nameText);
+        }
+    }
+
+    private static final class ExecutableCandidate {
+        private final CtExecutable<?> executable;
+        private final String canonicalSignature;
+        private final String packageInsensitiveCanonicalSignature;
+        private final String executableName;
+        private final int arity;
+
+        private ExecutableCandidate(
+            CtExecutable<?> executable,
+            String canonicalSignature,
+            String packageInsensitiveCanonicalSignature,
+            String executableName,
+            int arity
+        ) {
+            this.executable = executable;
+            this.canonicalSignature = canonicalSignature;
+            this.packageInsensitiveCanonicalSignature = packageInsensitiveCanonicalSignature;
+            this.executableName = executableName;
+            this.arity = arity;
+        }
+
+        private static ExecutableCandidate from(CtExecutable<?> executable) {
+            String executableName = "";
+            String returnType = "";
+            if (executable instanceof CtMethod<?>) {
+                CtMethod<?> method = (CtMethod<?>) executable;
+                executableName = method.getSimpleName();
+                returnType = normalizeType(method.getType());
+            } else if (executable instanceof CtConstructor<?>) {
+                CtConstructor<?> constructor = (CtConstructor<?>) executable;
+                if (constructor.getDeclaringType() != null) {
+                    executableName = constructor.getDeclaringType().getSimpleName();
+                }
+            }
+
+            List<ParameterDescriptor> parameterDescriptors = new ArrayList<>();
+            for (CtParameter<?> parameter : executable.getParameters()) {
+                parameterDescriptors.add(ParameterDescriptor.fromParameter(parameter));
+            }
+
+            return new ExecutableCandidate(
+                executable,
+                SignatureSelector.buildCanonicalSignature(returnType, executableName, parameterDescriptors, false),
+                SignatureSelector.buildCanonicalSignature(returnType, executableName, parameterDescriptors, true),
+                executableName,
+                parameterDescriptors.size()
+            );
         }
     }
 
