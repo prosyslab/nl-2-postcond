@@ -9,9 +9,9 @@ from inspect_ai.model import ChatMessageSystem, ChatMessageUser, Model, get_mode
 from prompts import genOneWithRefJava
 
 JAVA_SYSTEM_PROMPT = (
-    "You are a programming assistant that generates executable Java only. "
+    "You are a programming assistant that generates executable java only. "
     "You generate correct code, so you only generate code you are sure of. "
-    "You have Java comments explaining your intent when possible."
+    "You have java comments explaining your intent when possible."
 )
 PROMPT_TEMPLATES = genOneWithRefJava
 TO_GENERATE_FULL = "symbolic postcondition"
@@ -78,7 +78,8 @@ def build_prompt(method_record: MethodRecord, prompt_version: str) -> str:
         toGenerateGoal=TO_GENERATE_GOAL,
         toGenerateShortCaps=TO_GENERATE_SHORT_CAPS,
         promptAdds="",
-        entrypoint=method_record.method_signature,
+        entrypoint=method_record.method or method_record.method_signature,
+        entrypointLong=method_record.method_signature,
     )
 
 

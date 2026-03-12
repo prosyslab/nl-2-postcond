@@ -99,30 +99,40 @@ The ${toGenerateShort} should hold true whenever the function ${entrypoint} exec
 #################################################################
 
 genOneWithRefJava = {
-    "base": Template("""You have the following Java code${promptAdds}, including the method ${entrypoint} that behaves as specified in its JavaDoc:
+    "base": Template("""You have some Java code which includes the method `${entrypointLong}`. This code may contain a natural language comment or Javadoc before ${entrypoint} specifying its correct behavior. You want to ensure that when the method is implemented, it behaves as specified in the Javadoc:
 
 ${codeStubAndDocstring}
 
-Please write exactly one ${toGenerateFull} for ${entrypoint}. Please write the ${toGenerateShort} in Java, and use exactly one Java assert statement at the end of the ${toGenerateShort}. Include a Java comment before the ${toGenerateShort} explaining what the ${toGenerateShort} ${toGenerateGoal}.  For variables, only use the method inputs, `this`, and the return value of the method. Do not call ${entrypoint} itself in the postcondition. Instead, assume that the method has already been called and its return value is available in a variable called `returnValue` that you can use. In the postcondition, only use pure helper methods with no side effects. Do not return any other textual description of the code other than the Java comment.
+Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Java and consist of exactly one `assert` statement. A Java comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the method signature, `this` when needed, and a hypothetical return value of the method, which we'll assume is stored in a variable `returnValue`.
+
+If the ${toGenerateShort} requires any Java standard library functions, include the corresponding imports. However, refrain from using external libraries or calling the method itself (in this case, ${entrypoint}) within the ${toGenerateShort}.
+
+If the ${toGenerateShort} calls any methods, they should only be those from the functional subset of Java. By this, we mean methods that are pure (i.e., no side effects, depend only on input values).
+
+Although the ${toGenerateShort} should still be less computationally complex than the method itself and easy for a human to read, it should aim to capture the method's main intended behavior as fully as possible within a single assert. Prefer the strongest semantically central property you can state confidently from the Javadoc, rather than a superficial or incidental fact about the output.
 
 Specifically, the format of your response should be:
 
 ```
-// Comment explaining what the ${toGenerateShort} does
+// Comment explaining what aspect of the method the ${toGenerateFull} checks
 CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING JAVA ASSERT GOES HERE
 ```
+
+Should they conflict, the ${toGenerateShort} should hold true whenever the method ${entrypoint} executes successfully as specified in the Javadoc, regardless of the actual implementation of the method.
 """),
-    "simple": Template("""You are provided with the following Java method implementation for ${entrypoint}, and you want to ensure it is implemented correctly according to the specification in the JavaDoc:
+    "simple": Template("""You have some Java code which includes the method `${entrypointLong}`. This code may contain a natural language comment or Javadoc before ${entrypoint} specifying its correct behavior. You want to ensure that when the method is implemented, it behaves as specified in the Javadoc:
 
 ${codeStubAndDocstring}
 
-Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Java, and consist of exactly one assert statement. A Java comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the method signature, `this`, and a hypothetical return value of the method, which we'll assume is stored in a variable `returnValue`.
+Your task is to write a ${toGenerateFull} for ${entrypoint}. The ${toGenerateShort} should be in Java and consist of exactly one `assert` statement. A Java comment explaining the ${toGenerateShort}'s meaning should precede it. For variables, the ${toGenerateShort} should only use the input parameters defined in the method signature, `this` when needed, and a hypothetical return value of the method, which we'll assume is stored in a variable `returnValue`.
 
-If the ${toGenerateShort} calls any methods, they should only be pure methods with no side effects. However, refrain from using external libraries or calling the method itself (in this case, ${entrypoint}) within the ${toGenerateShort}.
+If the ${toGenerateShort} requires any Java standard library functions, include the corresponding imports. However, refrain from using external libraries or calling the method itself (in this case, ${entrypoint}) within the ${toGenerateShort}.
+
+If the ${toGenerateShort} calls any methods, they should only be those from the functional subset of Java. By this, we mean methods that are pure (i.e., no side effects, depend only on input values).
 
 Although the ${toGenerateShort} should be less computationally complex than the method itself and relatively simple, it should not be trivial. It should encapsulate an aspect of the method output specification without implementing the method itself and should be easily readable by a human.
 
-While not trivial, your ${toGenerateShort} should still be very simple and short. It should be a single line of code that is not too long, and it should capture only one aspect of the method's behavior, not all of it.
+While not trivial, your ${toGenerateShort} should still be very simple and short. It should be a single line of code that is not too long, and it should capture only one aspect of the method's behavior, not all of it. Choose exactly one specific property to check. For example, if the goal of the method were to sort a list, you might write a ${toGenerateShort} that checks that the elements in the list are in sorted order, or you might write a ${toGenerateShort} that checks that the list is the same size as the input list. You would not write a ${toGenerateShort} that checks both of these things.
 
 The format of your response should be:
 ```
@@ -130,7 +140,7 @@ The format of your response should be:
 CODE FOR EXACTLY ONE ${toGenerateShortCaps} USING JAVA ASSERT GOES HERE
 ```
 
-The ${toGenerateShort} should hold true whenever the method ${entrypoint} executes successfully as specified in the JavaDoc, regardless of its internal implementation.
+Should they conflict, the ${toGenerateShort} should hold true whenever the method ${entrypoint} executes successfully as specified in the Javadoc, regardless of the actual implementation of the method.
 """),
 }
 
