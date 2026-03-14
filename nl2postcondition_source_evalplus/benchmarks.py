@@ -1,6 +1,7 @@
 import json
 import re
 from pathlib import Path
+from typing import Any, Iterable, Iterator
 
 from evalplus.data import get_human_eval_plus
 from dataset_paths import get_defects4j_dataset_file
@@ -59,13 +60,44 @@ def resolve_defects4j_dataset_path(benchmarks_cfg) -> Path:
         getattr(benchmarks_cfg, "location", str(get_defects4j_dataset_file()))
     )
     if dataset_path.is_dir():
+        jsonl_path = dataset_path / "defects4j.jsonl"
+        if jsonl_path.is_file():
+            return jsonl_path
         dataset_path = dataset_path / "defects4j.json"
     return dataset_path
 
 
-def load_expecto_defects4j_methods(bugs, limit=None):
-    to_return = []
-    ids_count = {}
+def iter_defects4j_bugs(dataset_path: Path) -> Iterator[dict[str, Any]]:
+    if dataset_path.suffix == ".jsonl":
+        with dataset_path.open("r", encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                bug = json.loads(stripped)
+                if not isinstance(bug, dict):
+                    raise ValueError(
+                        "Expected a JSON object on "
+                        f"line {line_number} of {dataset_path}."
+                    )
+                yield bug
+        return
+
+    with dataset_path.open("r", encoding="utf-8") as handle:
+        loaded = json.load(handle)
+
+    bugs = loaded if isinstance(loaded, list) else [loaded]
+    for bug in bugs:
+        yield bug
+
+
+def iter_expecto_defects4j_methods(
+    bugs: Iterable[dict[str, Any]],
+    limit: int | None = None,
+) -> Iterator[dict[str, Any]]:
+    ids_count: dict[str, int] = {}
+    yielded = 0
 
     for bug in bugs:
         project = bug["project"]
@@ -84,34 +116,36 @@ def load_expecto_defects4j_methods(bugs, limit=None):
             if ids_count[base_id] > 1:
                 task_id = f"{base_id}_{ids_count[base_id]}"
 
-            to_return.append(
-                {
-                    "task_id": task_id,
-                    "id": task_id,
-                    "project": project,
-                    "bug_id": bug_id,
-                    "method_name": method_name,
-                    "method_signature": method_signature,
-                    "javadoc": method_info.get("javadoc", {}),
-                    "reference_code": method_info.get("code", ""),
-                    "file": method_info.get("file", ""),
-                    "entry_schema": method_info.get("entry_schema", {}),
-                    "exit_schema": method_info.get("exit_schema", {}),
-                }
-            )
-            if limit is not None and len(to_return) >= limit:
-                return to_return
+            yield {
+                "task_id": task_id,
+                "id": task_id,
+                "project": project,
+                "bug_id": bug_id,
+                "method_name": method_name,
+                "method_signature": method_signature,
+                "javadoc": method_info.get("javadoc", {}),
+                "reference_code": method_info.get("code", ""),
+                "file": method_info.get("file", ""),
+                "entry_schema": method_info.get("entry_schema", {}),
+                "exit_schema": method_info.get("exit_schema", {}),
+            }
+            yielded += 1
+            if limit is not None and yielded >= limit:
+                return
 
-    return to_return
+
+def load_expecto_defects4j_methods(bugs, limit=None):
+    return list(iter_expecto_defects4j_methods(bugs, limit=limit))
+
+
+def iter_defects4j_method_examples(benchmarks_cfg, limit=None):
+    dataset_path = resolve_defects4j_dataset_path(benchmarks_cfg)
+    bugs = iter_defects4j_bugs(dataset_path)
+    yield from iter_expecto_defects4j_methods(bugs, limit=limit)
 
 
 def load_defects4j_method_examples(benchmarks_cfg, limit=None):
-    dataset_path = resolve_defects4j_dataset_path(benchmarks_cfg)
-    with open(dataset_path, "r") as f:
-        loaded = json.load(f)
-
-    bugs = loaded if isinstance(loaded, list) else [loaded]
-    return load_expecto_defects4j_methods(bugs, limit=limit)
+    return list(iter_defects4j_method_examples(benchmarks_cfg, limit=limit))
 
 
 def load_defects4j(benchmarks_cfg):

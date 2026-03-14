@@ -4,7 +4,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import spoon.Launcher;
@@ -12,6 +14,7 @@ import spoon.reflect.CtModel;
 import spoon.reflect.code.CtBlock;
 import spoon.reflect.code.CtCodeSnippetStatement;
 import spoon.reflect.code.CtExpression;
+import spoon.reflect.code.CtLiteral;
 import spoon.reflect.code.CtReturn;
 import spoon.reflect.code.CtStatement;
 import spoon.reflect.cu.SourcePosition;
@@ -495,6 +498,9 @@ public final class Defects4JAssertionInjector {
             throw new IllegalStateException("Non-void method contains no return statements");
         }
 
+        String declaredReturnType = method.getType().clone().toString();
+        String preferredReturnType = inferPreferredTemporaryReturnType(returns, declaredReturnType);
+
         for (CtReturn<?> originalReturn : returns) {
             CtExpression<?> returnedExpression = originalReturn.getReturnedExpression();
             if (returnedExpression == null) {
@@ -502,7 +508,11 @@ public final class Defects4JAssertionInjector {
             }
 
             CtBlock<?> replacement = factory.createBlock();
-            String returnType = method.getType().clone().toString();
+            String returnType = resolveTemporaryReturnType(
+                returnedExpression,
+                preferredReturnType,
+                declaredReturnType
+            );
             String returnExpression = returnedExpression.clone().toString();
             replacement.addStatement(
                 createSnippet(
@@ -515,6 +525,62 @@ public final class Defects4JAssertionInjector {
 
             originalReturn.replace(replacement);
         }
+    }
+
+    private static String inferPreferredTemporaryReturnType(
+        List<CtReturn<?>> returns,
+        String fallbackType
+    ) {
+        Set<String> nonNullReturnTypes = new LinkedHashSet<>();
+        for (CtReturn<?> ctReturn : returns) {
+            CtExpression<?> returnedExpression = ctReturn.getReturnedExpression();
+            if (returnedExpression == null || isNullLiteral(returnedExpression)) {
+                continue;
+            }
+            String expressionType = stringifyTypeReference(returnedExpression.getType());
+            if (!expressionType.isEmpty()) {
+                nonNullReturnTypes.add(expressionType);
+                if (nonNullReturnTypes.size() > 1) {
+                    return fallbackType;
+                }
+            }
+        }
+        if (nonNullReturnTypes.size() == 1) {
+            return nonNullReturnTypes.iterator().next();
+        }
+        return fallbackType;
+    }
+
+    private static String resolveTemporaryReturnType(
+        CtExpression<?> returnedExpression,
+        String preferredReturnType,
+        String fallbackType
+    ) {
+        if (!preferredReturnType.equals(fallbackType)) {
+            return preferredReturnType;
+        }
+        if (!isNullLiteral(returnedExpression)) {
+            String expressionType = stringifyTypeReference(returnedExpression.getType());
+            if (!expressionType.isEmpty()) {
+                return expressionType;
+            }
+        }
+        return fallbackType;
+    }
+
+    private static boolean isNullLiteral(CtExpression<?> expression) {
+        if (!(expression instanceof CtLiteral<?>)) {
+            return false;
+        }
+        CtLiteral<?> literal = (CtLiteral<?>) expression;
+        return literal.getValue() == null;
+    }
+
+    private static String stringifyTypeReference(CtTypeReference<?> typeReference) {
+        if (typeReference == null) {
+            return "";
+        }
+        return typeReference.clone().toString().trim();
     }
 
     private static CtCodeSnippetStatement createSnippet(Factory factory, String text) {

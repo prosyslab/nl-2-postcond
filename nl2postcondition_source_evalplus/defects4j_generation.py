@@ -2,9 +2,9 @@ import asyncio
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, TextIO
 
-from benchmarks import load_defects4j_method_examples
+from benchmarks import iter_defects4j_method_examples
 from inspect_ai.model import ChatMessageSystem, ChatMessageUser, Model, get_model
 from prompts import genOneWithRefJava
 
@@ -18,6 +18,7 @@ TO_GENERATE_FULL = "symbolic postcondition"
 TO_GENERATE_SHORT = "postcondition"
 TO_GENERATE_GOAL = "means"
 TO_GENERATE_SHORT_CAPS = "POSTCONDITION"
+PROMPT_VERSIONS = ("simple", "base")
 
 
 @dataclass(frozen=True)
@@ -153,11 +154,53 @@ async def generate_one(
     )
 
 
-def write_jsonl(path: Path, rows: list[GenerationResult]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as file:
-        for row in rows:
-            file.write(json.dumps(asdict(row), ensure_ascii=True) + "\n")
+async def generate_one_with_index(
+    sequence_index: int,
+    model: Model,
+    method_record: MethodRecord,
+    prompt_version: str,
+    semaphore: asyncio.Semaphore,
+) -> tuple[int, GenerationResult]:
+    return sequence_index, await generate_one(
+        model=model,
+        method_record=method_record,
+        prompt_version=prompt_version,
+        semaphore=semaphore,
+    )
+
+
+def write_jsonl_row(handle: TextIO, row: GenerationResult) -> None:
+    handle.write(json.dumps(asdict(row), ensure_ascii=True) + "\n")
+
+
+def flush_completed_results(
+    writer_by_prompt: Mapping[str, TextIO],
+    completed_tasks: set[asyncio.Task],
+    buffered_rows_by_prompt: dict[str, dict[int, GenerationResult]],
+    next_index_by_prompt: dict[str, int],
+) -> None:
+    touched_prompt_versions: set[str] = set()
+
+    for task in completed_tasks:
+        sequence_index, row = task.result()
+        buffered_rows_by_prompt[row.prompt_version][sequence_index] = row
+        touched_prompt_versions.add(row.prompt_version)
+
+    for prompt_version in touched_prompt_versions:
+        writer = writer_by_prompt[prompt_version]
+        buffered_rows = buffered_rows_by_prompt[prompt_version]
+        next_index = next_index_by_prompt[prompt_version]
+        wrote_row = False
+
+        # Preserve input order per prompt while still streaming completed rows.
+        while next_index in buffered_rows:
+            write_jsonl_row(writer, buffered_rows.pop(next_index))
+            next_index += 1
+            wrote_row = True
+
+        next_index_by_prompt[prompt_version] = next_index
+        if wrote_row:
+            writer.flush()
 
 
 async def run_generation(
@@ -172,15 +215,68 @@ async def run_generation(
         (),
         {"location": dataset_path, "name": "defects4j"},
     )()
-    method_records = load_defects4j_method_examples(benchmark_cfg, limit=limit)
-    typed_method_records = [MethodRecord.from_dict(record) for record in method_records]
     model = get_model(model_name)
     semaphore = asyncio.Semaphore(max_concurrency)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    writer_by_prompt = {
+        prompt_version: (output_dir / f"{prompt_version}.jsonl").open(
+            "w", encoding="utf-8"
+        )
+        for prompt_version in PROMPT_VERSIONS
+    }
+    pending_tasks: set[asyncio.Task] = set()
+    max_pending_tasks = max_concurrency * len(PROMPT_VERSIONS)
+    buffered_rows_by_prompt = {prompt_version: {} for prompt_version in PROMPT_VERSIONS}
+    next_index_by_prompt = {prompt_version: 0 for prompt_version in PROMPT_VERSIONS}
 
-    for prompt_version in ("simple", "base"):
-        tasks = [
-            generate_one(model, method_record, prompt_version, semaphore)
-            for method_record in typed_method_records
-        ]
-        rows = await asyncio.gather(*tasks)
-        write_jsonl(output_dir / f"{prompt_version}.jsonl", rows)
+    try:
+        for sequence_index, record in enumerate(
+            iter_defects4j_method_examples(benchmark_cfg, limit=limit)
+        ):
+            method_record = MethodRecord.from_dict(record)
+            for prompt_version in PROMPT_VERSIONS:
+                pending_tasks.add(
+                    asyncio.create_task(
+                        generate_one_with_index(
+                            sequence_index,
+                            model,
+                            method_record,
+                            prompt_version,
+                            semaphore,
+                        )
+                    )
+                )
+
+            # Keep the pending task set bounded while streaming results to disk.
+            if len(pending_tasks) >= max_pending_tasks:
+                completed_tasks, pending_tasks = await asyncio.wait(
+                    pending_tasks,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                flush_completed_results(
+                    writer_by_prompt,
+                    completed_tasks,
+                    buffered_rows_by_prompt,
+                    next_index_by_prompt,
+                )
+
+        while pending_tasks:
+            completed_tasks, pending_tasks = await asyncio.wait(
+                pending_tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            flush_completed_results(
+                writer_by_prompt,
+                completed_tasks,
+                buffered_rows_by_prompt,
+                next_index_by_prompt,
+            )
+    except Exception:
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+        raise
+    finally:
+        for handle in writer_by_prompt.values():
+            handle.close()

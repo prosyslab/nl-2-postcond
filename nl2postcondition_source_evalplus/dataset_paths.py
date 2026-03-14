@@ -19,4 +19,4 @@ def get_evalplus_dataset_file() -> Path:
 
 
 def get_defects4j_dataset_file() -> Path:
-    return DATASETS_DIR / "defects4j.json"
+    return DATASETS_DIR / "defects4j.jsonl"
