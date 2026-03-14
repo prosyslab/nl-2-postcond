@@ -209,6 +209,7 @@ async def run_generation(
     output_dir: Path,
     limit: int | None,
     max_concurrency: int,
+    prompt_versions: tuple[str, ...] = PROMPT_VERSIONS,
 ) -> None:
     benchmark_cfg = type(
         "BenchmarksCfg",
@@ -222,19 +223,19 @@ async def run_generation(
         prompt_version: (output_dir / f"{prompt_version}.jsonl").open(
             "w", encoding="utf-8"
         )
-        for prompt_version in PROMPT_VERSIONS
+        for prompt_version in prompt_versions
     }
     pending_tasks: set[asyncio.Task] = set()
-    max_pending_tasks = max_concurrency * len(PROMPT_VERSIONS)
-    buffered_rows_by_prompt = {prompt_version: {} for prompt_version in PROMPT_VERSIONS}
-    next_index_by_prompt = {prompt_version: 0 for prompt_version in PROMPT_VERSIONS}
+    max_pending_tasks = max_concurrency * len(prompt_versions)
+    buffered_rows_by_prompt = {prompt_version: {} for prompt_version in prompt_versions}
+    next_index_by_prompt = {prompt_version: 0 for prompt_version in prompt_versions}
 
     try:
         for sequence_index, record in enumerate(
             iter_defects4j_method_examples(benchmark_cfg, limit=limit)
         ):
             method_record = MethodRecord.from_dict(record)
-            for prompt_version in PROMPT_VERSIONS:
+            for prompt_version in prompt_versions:
                 pending_tasks.add(
                     asyncio.create_task(
                         generate_one_with_index(
