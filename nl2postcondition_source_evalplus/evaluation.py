@@ -5,24 +5,19 @@ import os
 import subprocess
 import sys
 import tempfile
-from textwrap import indent
 from pathlib import Path
+from textwrap import indent
 from typing import List, Optional
 
 import click
+from dataset_paths import get_evalplus_dataset_file
 from models import (
     AggregatedResult,
     EvaluationResult,
 )
 from parallelism import get_scaled_worker_count
 from tqdm.asyncio import tqdm as atqdm
-
-from dataset_paths import get_evalplus_dataset_file
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.append(str(PROJECT_ROOT))
-
-from validation_sampling import sample_io_pairs_payload, VALIDATION_SAMPLING_MODES
+from validation_sampling import VALIDATION_SAMPLING_MODES, sample_io_pairs_payload
 
 PPX_SAMPLE_JSONL = "preprocessed_samples.jsonl"
 EVAL_TIMEOUT_SECONDS = 30
@@ -106,7 +101,11 @@ def read_target_directory(target_directory: str) -> list[dict]:
 
 def get_eval_code_with_parser(assertion: str, signature: str, args, parser: str) -> str:
     signature = signature.split("\n")[0]
-    assertion = assertion.replace("returnValue", "result").replace("return_value", "result").replace("assert", "return")
+    assertion = (
+        assertion.replace("returnValue", "result")
+        .replace("return_value", "result")
+        .replace("assert", "return")
+    )
     eval_code = f"""from typing import *
 import math
 import re
@@ -132,7 +131,11 @@ error_cnt = 0
 def get_eval_code_with_io_pairs(assertion: str, signature: str, io_pairs: str) -> str:
     io_pairs_dict = json.loads(io_pairs)
     signature = signature.split("\n")[0]
-    assertion = assertion.replace("returnValue", "result").replace("return_value", "result").replace("assert", "return")
+    assertion = (
+        assertion.replace("returnValue", "result")
+        .replace("return_value", "result")
+        .replace("assert", "return")
+    )
     eval_code = f"""from typing import *
 import math
 import re
@@ -195,7 +198,12 @@ def run_code_sync(
         except subprocess.TimeoutExpired as exc:
             write_log(stdout_log_path, normalize_output(exc.stdout))
             write_log(stderr_log_path, normalize_output(exc.stderr) + "Timeout\n")
-            return 0, 0, num_of_tc, f"Timeout. See logs: {stdout_log_path}, {stderr_log_path}"
+            return (
+                0,
+                0,
+                num_of_tc,
+                f"Timeout. See logs: {stdout_log_path}, {stderr_log_path}",
+            )
 
         write_log(stdout_log_path, completed.stdout)
         write_log(stderr_log_path, completed.stderr or "")
@@ -211,7 +219,12 @@ def run_code_sync(
 
         stdout_str = completed.stdout.strip()
         if not stdout_str:
-            return 0, 0, num_of_tc, f"No stdout. See logs: {stdout_log_path}, {stderr_log_path}"
+            return (
+                0,
+                0,
+                num_of_tc,
+                f"No stdout. See logs: {stdout_log_path}, {stderr_log_path}",
+            )
 
         processed = stdout_str.split()
         if len(processed) != 3:

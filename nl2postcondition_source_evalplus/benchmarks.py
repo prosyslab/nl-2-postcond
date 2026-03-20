@@ -4,8 +4,8 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from evalplus.data import get_human_eval_plus
 from dataset_paths import get_defects4j_dataset_file
+from evalplus.data import get_human_eval_plus
 
 logger = getLogger(__name__)
 
@@ -41,6 +41,7 @@ def load_evalplus_subset(evalplus_cfg):
             filtered_problems[key] = value
 
     return filtered_problems
+
 
 METHOD_ID_SANITIZER = re.compile(r"[^0-9A-Za-z]+")
 
@@ -160,7 +161,9 @@ def iter_expecto_defects4j_methods(
                 break
 
         missing_ids = [
-            sample_id for sample_id in ordered_sample_ids if sample_id not in matched_records
+            sample_id
+            for sample_id in ordered_sample_ids
+            if sample_id not in matched_records
         ]
         if missing_ids:
             logger.warning("Unknown Defects4J sample IDs requested: %s", missing_ids)

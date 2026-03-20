@@ -53,7 +53,6 @@ def load_jsonl(file):
     This loads in the jsonl of raw llm runs such that we have a jsonl file
     with the same number of lines as the number of samples
     """
-    toReturn = []
     with open(file, "r") as f:
         return [json.loads(line) for line in f]
 

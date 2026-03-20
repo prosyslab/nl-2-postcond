@@ -1,7 +1,6 @@
 import argparse
 import glob
 import json
-import multiprocessing
 import os
 import pickle
 import shutil
@@ -70,7 +69,6 @@ def get_groundtruth(problems, hashcode):
 
     with open(cache_file, "wb") as f:
         pickle.dump(expected_output, f)
-    import sys
 
     sys.set_int_max_str_digits(0)
     # json.dump(expected_output, open(f"/app/expected_output.json", "w"))
@@ -280,7 +278,7 @@ def evaluate_post_condition_power(
         if not os.path.exists(base_path):
             try:
                 os.makedirs(base_path)
-            except:
+            except OSError:
                 print_and_log("Failed to make dir")
 
         with open(result_path, "w") as f:
@@ -325,8 +323,8 @@ def evaluate_post_condition_soundness(
 
     assert len(preprocessedSamplesFile) == 1
     print_and_log(
-        "😊  Successfully located the preprocessed samples at".format(
-            len(postcondition_sample_dir)
+        "😊  Successfully located the preprocessed samples at {}".format(
+            postcondition_sample_dir
         )
     )
 
@@ -501,7 +499,7 @@ def evaluate_post_condition_soundness(
     base_correct = []
     new_correct = []
 
-    print_and_log("😊  Calculating pass@k 😊".format(result_path))
+    print_and_log("😊  Calculating pass@k 😊")
 
     for res in soundness_results["eval"].values():
         bc = sum([r[0] == SUCCESS for r in res["base"]])
@@ -980,7 +978,6 @@ def runEvalofPostconditions(flags, postcondition_sample_dir, output_dir, problem
                 task_id, postcondition_info["response_num"]
             )
         )
-        num_base_tests = len(problems[task_id]["base_input"])
         raw_postcondition = postcondition_info["post_condition"]
         sanitized_postcondition = code_sanitize(raw_postcondition)
 

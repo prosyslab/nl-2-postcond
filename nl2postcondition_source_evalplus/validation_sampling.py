@@ -84,9 +84,7 @@ def sample_mapping_for_validation(
         base_seed=base_seed,
     )
     sampled_key_set = set(sampled_keys)
-    return {
-        key: value for key, value in copied_items.items() if key in sampled_key_set
-    }
+    return {key: value for key, value in copied_items.items() if key in sampled_key_set}
 
 
 def sample_io_pairs_payload(

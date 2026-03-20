@@ -14,8 +14,8 @@ import prompts
 from benchmarks import load_benchmarks
 from evalplus.data import write_jsonl
 from log import make_header
-from openai import OpenAI
 from omegaconf import OmegaConf
+from openai import OpenAI
 from parallelism import get_scaled_worker_count
 from tenacity import Retrying, stop_after_attempt, wait_random_exponential
 
@@ -43,9 +43,7 @@ def setup_api(api_cfg, print_and_log):
     global CLIENT
     api_key = os.getenv(api_cfg.key)
     assert api_key is not None, (
-        "API key not found. Please set the {} environment variable.".format(
-            api_cfg.key
-        )
+        "API key not found. Please set the {} environment variable.".format(api_cfg.key)
     )
     CLIENT = OpenAI(api_key=api_key)
 
@@ -80,7 +78,6 @@ def prepare_prompt(exper_cfg, problem, benchmark_name="") -> str:
     toGenerateFull = ""
     toGenerateShort = ""
     toGenerateGoal = ""
-    toUse = ""
     toGenerateShortCaps = ""
     promptAdds = ""
     (problem.keys())
@@ -101,7 +98,7 @@ def prepare_prompt(exper_cfg, problem, benchmark_name="") -> str:
 
     # If we are doing the code generation task (used to generate buggy code mutants)
     if exper_cfg.to_generate == "code":
-        if exper_cfg.gen_buggy == False:
+        if not exper_cfg.gen_buggy:
             return prompts.genCode.substitute(
                 codeStubAndDocstring=code, entrypoint=entrypoint
             )
@@ -211,7 +208,13 @@ def ask(prompt, exper_cfg, log_only):
 
 
 def generate_one_completion(
-    exper_cfg, problem, task_id, run_num, log_only, benchmark_name="", postconditions=None
+    exper_cfg,
+    problem,
+    task_id,
+    run_num,
+    log_only,
+    benchmark_name="",
+    postconditions=None,
 ):
     """
     This function gets and processes one call from the API
@@ -238,9 +241,7 @@ def generate_one_completion(
         log_only("Error for {}: {}".format(task_id, str(e)))
         log_only("\n\n\n")
         log_only(
-            "Even with retries, not able to generate for {}: {}".format(
-                task_id, str(e)
-            )
+            "Even with retries, not able to generate for {}: {}".format(task_id, str(e))
         )
         return None
 

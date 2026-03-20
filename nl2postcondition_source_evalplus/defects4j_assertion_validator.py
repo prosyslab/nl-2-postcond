@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import re
@@ -9,12 +8,12 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import click
-
 
 PROJECT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PROJECT_DIR.parent.parent
@@ -165,14 +164,16 @@ def extract_single_assertion(text: str) -> str:
 
     assert_positions = find_assert_positions(candidate)
     if len(assert_positions) != 1:
-        raise ValueError(f"expected exactly one assert statement, found {len(assert_positions)}")
+        raise ValueError(
+            f"expected exactly one assert statement, found {len(assert_positions)}"
+        )
 
     assert_index = assert_positions[0]
     semicolon_index = find_statement_terminator(candidate, assert_index)
     if semicolon_index is None:
         raise ValueError("assert statement does not end with ';'")
 
-    assertion_statement = candidate[assert_index:semicolon_index + 1].strip()
+    assertion_statement = candidate[assert_index : semicolon_index + 1].strip()
     trailing_text = candidate[semicolon_index + 1 :]
     if find_assert_positions(trailing_text):
         raise ValueError("multiple assert statements detected")
@@ -324,7 +325,10 @@ def ensure_spoon_jar() -> Path:
 def ensure_git_safe_config() -> Path:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     config_path = CACHE_DIR / "git-safe.conf"
-    if config_path.exists() and config_path.read_text(encoding="utf-8") == GIT_SAFE_CONFIG:
+    if (
+        config_path.exists()
+        and config_path.read_text(encoding="utf-8") == GIT_SAFE_CONFIG
+    ):
         return config_path
 
     with tempfile.NamedTemporaryFile(
@@ -351,7 +355,10 @@ def ensure_injector_build(spoon_jar_path: Path) -> Path:
     build_dir = CACHE_DIR / "injector_build"
     class_file = build_dir / f"{INJECTOR_CLASS_NAME}.class"
     source_file = JAVA_HELPER_DIR / f"{INJECTOR_CLASS_NAME}.java"
-    if class_file.exists() and class_file.stat().st_mtime >= source_file.stat().st_mtime:
+    if (
+        class_file.exists()
+        and class_file.stat().st_mtime >= source_file.stat().st_mtime
+    ):
         return build_dir
 
     if build_dir.exists():
@@ -373,7 +380,9 @@ def ensure_injector_build(spoon_jar_path: Path) -> Path:
     return build_dir
 
 
-def compile_junit_runner(workdir: Path, metadata: CheckoutMetadata, build_dir: Path) -> Path:
+def compile_junit_runner(
+    workdir: Path, metadata: CheckoutMetadata, build_dir: Path
+) -> Path:
     source_file = JAVA_HELPER_DIR / f"{JUNIT_RUNNER_CLASS_NAME}.java"
     build_dir.mkdir(parents=True, exist_ok=True)
     runtime_classpath = build_runtime_classpath(workdir, metadata, build_dir=None)
@@ -466,7 +475,9 @@ def build_runtime_classpath(
     return os.pathsep.join(classpath_entries)
 
 
-def resolve_relative_source_file(method_file_path: str, source_root: Path, source_dir_hint: str) -> str:
+def resolve_relative_source_file(
+    method_file_path: str, source_root: Path, source_dir_hint: str
+) -> str:
     normalized_method_path = method_file_path.replace("\\", "/")
     normalized_hint = source_dir_hint.strip("/").replace("\\", "/")
     token = f"/{normalized_hint}/"
@@ -476,7 +487,9 @@ def resolve_relative_source_file(method_file_path: str, source_root: Path, sourc
     file_name = Path(method_file_path).name
     candidates = list(source_root.rglob(file_name))
     if not candidates:
-        raise FileNotFoundError(f"Could not locate source file {file_name} under {source_root}")
+        raise FileNotFoundError(
+            f"Could not locate source file {file_name} under {source_root}"
+        )
     if len(candidates) == 1:
         return candidates[0].relative_to(source_root).as_posix()
 
@@ -488,9 +501,13 @@ def resolve_relative_source_file(method_file_path: str, source_root: Path, sourc
     return best_candidate.relative_to(source_root).as_posix()
 
 
-def suffix_match_score(candidate_parts: tuple[str, ...], target_parts: tuple[str, ...]) -> int:
+def suffix_match_score(
+    candidate_parts: tuple[str, ...], target_parts: tuple[str, ...]
+) -> int:
     score = 0
-    for candidate_part, target_part in zip(reversed(candidate_parts), reversed(target_parts)):
+    for candidate_part, target_part in zip(
+        reversed(candidate_parts), reversed(target_parts)
+    ):
         if candidate_part != target_part:
             break
         score += 1
@@ -548,7 +565,9 @@ def inject_assertion(
             relative_file=relative_file,
             source_file_name=Path(relative_file).name,
             assert_lines=[],
-            error=command_result.stderr.strip() or command_result.stdout.strip() or "Injector failed",
+            error=command_result.stderr.strip()
+            or command_result.stdout.strip()
+            or "Injector failed",
         )
 
     payload = json.loads(result_file.read_text(encoding="utf-8"))
@@ -588,7 +607,9 @@ def run_junit_test(
     assert_lines: list[int],
     timeout: int,
 ) -> dict[str, Any]:
-    runtime_classpath = build_runtime_classpath(workdir, metadata, build_dir=runner_build_dir)
+    runtime_classpath = build_runtime_classpath(
+        workdir, metadata, build_dir=runner_build_dir
+    )
     command_result = run_command(
         [
             "java",
@@ -1010,7 +1031,9 @@ def evaluate_record(
                 and fixed_compile is not None
                 and fixed_compile.returncode == 0
             ):
-                compile_junit_runner(fixed_workdir, fixed_metadata, fixed_runner_build_dir)
+                compile_junit_runner(
+                    fixed_workdir, fixed_metadata, fixed_runner_build_dir
+                )
                 relevant_summary = summarize_relevant_tests(
                     workdir=fixed_workdir,
                     metadata=fixed_metadata,
@@ -1033,7 +1056,9 @@ def evaluate_record(
                 and buggy_compile is not None
                 and buggy_compile.returncode == 0
             ):
-                compile_junit_runner(buggy_workdir, buggy_metadata, buggy_runner_build_dir)
+                compile_junit_runner(
+                    buggy_workdir, buggy_metadata, buggy_runner_build_dir
+                )
                 trigger_buggy_summary = summarize_trigger_tests(
                     workdir=buggy_workdir,
                     metadata=buggy_metadata,
@@ -1085,12 +1110,24 @@ def summarize_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
         "category_counts": category_counts,
         "completeness_passed": sum(1 for report in reports if report["completeness"]),
         "soundness_passed": sum(1 for report in reports if report["soundness"]),
-        "relevant_tests_total": sum(report["relevant"]["tests_total"] for report in reports),
-        "relevant_tests_passed": sum(report["relevant"]["tests_passed"] for report in reports),
-        "trigger_fixed_total": sum(report["trigger_fixed"]["tests_total"] for report in reports),
-        "trigger_fixed_passed": sum(report["trigger_fixed"]["tests_passed"] for report in reports),
-        "trigger_buggy_total": sum(report["trigger_buggy"]["tests_total"] for report in reports),
-        "trigger_buggy_detected": sum(report["trigger_buggy"]["detected"] for report in reports),
+        "relevant_tests_total": sum(
+            report["relevant"]["tests_total"] for report in reports
+        ),
+        "relevant_tests_passed": sum(
+            report["relevant"]["tests_passed"] for report in reports
+        ),
+        "trigger_fixed_total": sum(
+            report["trigger_fixed"]["tests_total"] for report in reports
+        ),
+        "trigger_fixed_passed": sum(
+            report["trigger_fixed"]["tests_passed"] for report in reports
+        ),
+        "trigger_buggy_total": sum(
+            report["trigger_buggy"]["tests_total"] for report in reports
+        ),
+        "trigger_buggy_detected": sum(
+            report["trigger_buggy"]["detected"] for report in reports
+        ),
         "failing_record_ids": [
             report["id"]
             for report in reports
@@ -1274,7 +1311,9 @@ def main(
         raise click.ClickException(f"No jsonl input files found under {input_path}")
 
     if output_dir is None:
-        output_dir = (input_path if input_path.is_dir() else input_path.parent) / "validation"
+        output_dir = (
+            input_path if input_path.is_dir() else input_path.parent
+        ) / "validation"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for jsonl_file in input_files:
@@ -1303,7 +1342,9 @@ def main(
 
         write_jsonl(jsonl_report_path, reports)
         write_jsonl(final_jsonl_path, final_rows)
-        summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+        summary_path.write_text(
+            json.dumps(summary, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+        )
         write_markdown_summary(markdown_path, input_file=jsonl_file, summary=summary)
 
         click.echo(f"  Wrote {jsonl_report_path}")

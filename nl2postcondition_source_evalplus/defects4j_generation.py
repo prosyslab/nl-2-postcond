@@ -1,6 +1,6 @@
 import asyncio
-from dataclasses import asdict, dataclass
 import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, TextIO
 
@@ -136,7 +136,9 @@ async def generate_one(
 
     raw_response = result.message.content
     if isinstance(raw_response, list):
-        raw_response = "\n".join(str(getattr(part, "text", part)) for part in raw_response)
+        raw_response = "\n".join(
+            str(getattr(part, "text", part)) for part in raw_response
+        )
 
     return GenerationResult(
         id=method_record.id,
